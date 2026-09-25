@@ -1,0 +1,63 @@
+name: build
+
+# Compila el backend con PyInstaller y la app Tauri en cada plataforma.
+# Compilar por-SO es obligatorio: no se cross-compila cómodo (ARCHITECTURE.md §9).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            triple: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            triple: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Congelar el backend con PyInstaller
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+          pyinstaller --onefile --name janus-backend janus/main.py
+
+      - name: Ubicar el sidecar con el target triple
+        shell: bash
+        run: |
+          mkdir -p src-tauri/binaries
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp backend/dist/janus-backend.exe "src-tauri/binaries/janus-backend-${{ matrix.triple }}.exe"
+          else
+            cp backend/dist/janus-backend "src-tauri/binaries/janus-backend-${{ matrix.triple }}"
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Deps de Linux para Tauri
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Build de la app (Tauri)
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: janus-${{ matrix.triple }}
+          path: |
+            src-tauri/target/release/bundle/**/*

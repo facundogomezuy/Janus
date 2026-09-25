@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/binaries/
+src-tauri/gen/
+
+# Node (cuando el frontend pase a Vite)
+node_modules/
+
+# Janus
+*.sqlite
+*.sqlite3
+janus-ca.pem
+
+# SO / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

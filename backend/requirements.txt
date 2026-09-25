@@ -1,0 +1,6 @@
+# Dependencias del backend Janus.
+# Instalá con:  pip install -r requirements.txt
+fastapi>=0.110
+uvicorn>=0.29
+# Motor de interceptación (se empieza a usar en M1):
+mitmproxy>=11.0

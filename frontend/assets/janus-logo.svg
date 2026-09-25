@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 232 64" width="232" height="64" fill="none" role="img" aria-label="Janus">
+  <title>Janus</title>
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="32" cy="32" r="22" stroke="#1D9E75" stroke-width="4.2"/>
+    <path d="M27,23 L20,32 L27,41" stroke="#1D9E75" stroke-width="3.2"/>
+    <path d="M37,23 L44,32 L37,41" stroke="#1D9E75" stroke-width="3.2"/>
+    <path d="M33,25.5 L27.5,32 L33,38.5" stroke="#1D9E75" stroke-width="2.4" stroke-opacity="0.5"/>
+    <path d="M31,25.5 L36.5,32 L31,38.5" stroke="#1D9E75" stroke-width="2.4" stroke-opacity="0.5"/>
+  </g>
+  <text x="72" y="42" fill="currentColor" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="34" font-weight="500" letter-spacing="1">janus</text>
+</svg>
