@@ -573,3 +573,10 @@ def test_client_rejecting_ca_creates_hint_event(janus, targets):
     ev = janus.api.wait_for(tls_event)
     assert "rechazó el certificado de Janus para localhost" in ev["message"]
     assert "CA" in ev["hint"]
+
+
+def test_browser_launch_rejects_non_http_urls(janus):
+    """La URL inicial va como argumento al navegador: nunca debe poder ser un flag."""
+    for bad in ("--disable-web-security://x", "file:///etc/passwd", "javascript://alert(1)"):
+        status, data = janus.api.post("/api/browsers/launch", {"url": bad})
+        assert status == 400 and "http" in data["detail"], (bad, status, data)

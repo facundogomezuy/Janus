@@ -12,6 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -122,6 +123,19 @@ class OpenTarget(BaseModel):
 
 def _bad_request(exc: Exception) -> HTTPException:
     return HTTPException(status_code=400, detail=str(exc))
+
+
+def _browser_url(raw: str | None) -> str | None:
+    """URL inicial del navegador Janus: solo http(s), así nunca llega como flag."""
+    url = (raw or "").strip()
+    if not url:
+        return None
+    if "://" not in url:
+        url = "https://" + url
+    parts = urlsplit(url)
+    if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
+        raise HTTPException(status_code=400, detail="la URL inicial tiene que ser http:// o https://")
+    return url
 
 
 def _open_path(path: Path) -> None:
@@ -297,8 +311,6 @@ def create_app(core: Core, *, frontend_dir: Path | None = None, on_shutdown=None
 
     @app.post("/api/scope/test", dependencies=guard)
     def test_scope(body: ScopeTest) -> dict:
-        from urllib.parse import urlsplit
-
         raw = body.url.strip()
         if "://" not in raw:
             raw = "https://" + raw
@@ -413,14 +425,13 @@ def create_app(core: Core, *, frontend_dir: Path | None = None, on_shutdown=None
 
     @app.post("/api/browsers/launch", dependencies=guard)
     async def launch_browser(body: BrowserLaunch) -> dict:
+        _browser_url(body.url)  # validar antes de buscar navegadores
         found = await asyncio.to_thread(browsers.detect)
         if not found:
             raise HTTPException(status_code=404, detail="no se encontró Chrome, Edge, Brave ni Firefox")
         chosen = next((b for b in found if b.id == body.id), None) if body.id else None
         chosen = chosen or next((b for b in found if b.engine == "chromium"), found[0])
-        url = body.url.strip() if body.url else None
-        if url and "://" not in url:
-            url = "https://" + url
+        url = _browser_url(body.url)
         s = core.settings
         spki = ca.spki_sha256_b64(ca.load_cert(core.confdir))
         try:
