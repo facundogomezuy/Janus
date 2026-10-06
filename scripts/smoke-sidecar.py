@@ -9,6 +9,7 @@ PyInstaller sin consola (Windows) arranca y habla por los pipes.
 """
 from __future__ import annotations
 
+import contextlib
 import http.client
 import json
 import os
@@ -55,51 +56,80 @@ def main() -> int:
     threading.Thread(target=target.serve_forever, daemon=True).start()
     proxy_port = free_port()
 
-    with tempfile.TemporaryDirectory() as data:
+    # ignore_cleanup_errors: en Windows un motor que quedó vivo bloquea janus.log
+    # y el PermissionError del borrado taparía el error real.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as data:
         env = {**os.environ, "JANUS_DATA_DIR": data}
         t0 = time.monotonic()
         proc = subprocess.Popen(
             [str(exe), "--sidecar", "--proxy-port", str(proxy_port)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
         )
-        box: dict = {}
-        reader = threading.Thread(target=lambda: box.setdefault("line", proc.stdout.readline()), daemon=True)
-        reader.start()
-        reader.join(timeout=90)
-        line = box.get("line", b"").decode("utf-8", "replace").strip()
-        if not line.startswith("JANUS_READY "):
-            proc.kill()
-            print(f"sin handshake: {line!r}\n{proc.stderr.read().decode('utf-8', 'replace')}")
-            return 1
-        hs = json.loads(line.split(" ", 1)[1])
-        print(f"handshake en {time.monotonic() - t0:.1f}s: api :{hs['port']}, proxy {hs['proxy']}")
-        assert hs["proxy"]["running"], "el proxy no está escuchando"
-
-        api = http.client.HTTPConnection("127.0.0.1", hs["port"], timeout=10)
-        api.request("GET", "/api/status", headers={"Authorization": f"Bearer {hs['token']}"})
-        status = api.getresponse()
-        assert status.status == 200, f"/api/status -> {status.status}"
-        status.read()
-
-        via = http.client.HTTPConnection("127.0.0.1", proxy_port, timeout=15)
-        via.request("GET", f"http://127.0.0.1:{target.server_address[1]}/smoke")
-        res = via.getresponse()
-        assert res.status == 200 and json.loads(res.read()) == {"ok": True}, "el proxy no reenvió el request"
-
-        api.request("GET", "/api/history", headers={"Authorization": f"Bearer {hs['token']}"})
-        flows = json.loads(api.getresponse().read())["flows"]
-        assert any(f["path"] == "/smoke" for f in flows), "el flow no quedó en el historial"
-        print("proxy + historial OK")
-
-        # apagado como Tauri: "shutdown" por stdin
-        proc.stdin.write(b"shutdown\n")
-        proc.stdin.flush()
-        rc = proc.wait(timeout=30)
-        assert rc == 0, f"salió con código {rc}: {proc.stderr.read().decode('utf-8', 'replace')}"
-        print("apagado ordenado OK")
+        stderr: list[bytes] = []  # drenado en un hilo: un pipe lleno frenaría al motor
+        threading.Thread(target=lambda: stderr.extend(iter(proc.stderr.readline, b"")), daemon=True).start()
+        try:
+            check(proc, t0, proxy_port, target.server_address[1])
+        except Exception:
+            print("--- stderr del motor ---\n" + b"".join(stderr).decode("utf-8", "replace"))
+            raise
+        finally:
+            if proc.poll() is None:
+                # EOF en stdin: el motor se apaga solo (kill() solo mataría al cargador de PyInstaller)
+                with contextlib.suppress(OSError):
+                    proc.stdin.close()
+                try:
+                    proc.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=10)
     target.shutdown()
     return 0
 
+
+def check(proc: subprocess.Popen, t0: float, proxy_port: int, target_port: int) -> None:
+    box: dict = {}
+    reader = threading.Thread(target=lambda: box.setdefault("line", proc.stdout.readline()), daemon=True)
+    reader.start()
+    reader.join(timeout=90)
+    line = box.get("line", b"").decode("utf-8", "replace").strip()
+    assert line.startswith("JANUS_READY "), f"sin handshake: {line!r}"
+    hs = json.loads(line.split(" ", 1)[1])
+    print(f"handshake en {time.monotonic() - t0:.1f}s: api :{hs['port']}, proxy {hs['proxy']}")
+    assert hs["proxy"]["running"], "el proxy no está escuchando"
+    auth = {"Authorization": f"Bearer {hs['token']}"}
+
+    def get(path: str):
+        api = http.client.HTTPConnection("127.0.0.1", hs["port"], timeout=10)
+        api.request("GET", path, headers=auth)
+        r = api.getresponse()
+        body = r.read()
+        api.close()
+        return r.status, body
+
+    status, _ = get("/api/status")
+    assert status == 200, f"/api/status -> {status}"
+
+    via = http.client.HTTPConnection("127.0.0.1", proxy_port, timeout=15)
+    via.request("GET", f"http://127.0.0.1:{target_port}/smoke")
+    res = via.getresponse()
+    assert res.status == 200 and json.loads(res.read()) == {"ok": True}, "el proxy no reenvió el request"
+
+    # el historial se escribe en SQLite desde otro hilo: esperar a que aparezca
+    deadline = time.monotonic() + 10
+    while True:
+        flows = json.loads(get("/api/history")[1])["flows"]
+        if any(f["path"] == "/smoke" and f["state"] == "complete" for f in flows):
+            break
+        assert time.monotonic() < deadline, f"el flow no quedó en el historial: {flows}"
+        time.sleep(0.1)
+    print("proxy + historial OK")
+
+    # apagado como Tauri: "shutdown" por stdin
+    proc.stdin.write(b"shutdown\n")
+    proc.stdin.flush()
+    rc = proc.wait(timeout=30)
+    assert rc == 0, f"el motor salió con código {rc}"
+    print("apagado ordenado OK")
 
 if __name__ == "__main__":
     sys.exit(main())

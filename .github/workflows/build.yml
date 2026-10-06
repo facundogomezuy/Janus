@@ -83,6 +83,8 @@ jobs:
       # El .exe sin consola tiene que hablar por los pipes que usa Tauri.
       - name: Prueba de humo del sidecar
         run: python scripts/smoke-sidecar.py
+        env:
+          PYTHONUTF8: "1"
 
       - name: Build de la app (Tauri)
         run: npx tauri build --bundles ${{ matrix.bundles }}
