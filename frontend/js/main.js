@@ -1,7 +1,7 @@
 // Janus — arranque del frontend.
 
 import { Api, resolveBackend } from "./api.js";
-import { $, fmtInt, h, icon, logoMark, sleep, toast } from "./dom.js";
+import { $, fmtFlows, h, icon, logoMark, sleep, toast } from "./dom.js";
 import { createEventsDrawer, openSettings } from "./panels.js";
 import { toggleTheme } from "./theme.js";
 import { createHistory } from "./views/history.js";
@@ -243,7 +243,7 @@ app.setEventCount = (n, { seen = false, latest } = {}) => {
 };
 
 function renderFlows() {
-  sb.flows.querySelector(".t").textContent = `${fmtInt(app.status?.flows ?? 0)} flows`;
+  sb.flows.querySelector(".t").textContent = fmtFlows(app.status?.flows ?? 0);
 }
 
 function setWs(state) {

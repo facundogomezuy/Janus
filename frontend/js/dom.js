@@ -155,6 +155,7 @@ export function fmtAgo(ts) {
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
 }
 export const fmtInt = (n) => (n ?? 0).toLocaleString("es");
+export const fmtFlows = (n) => `${fmtInt(n)} ${n === 1 ? "flow" : "flows"}`;
 
 export function debounce(fn, ms) {
   let t;

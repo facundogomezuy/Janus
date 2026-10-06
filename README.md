@@ -6,6 +6,12 @@ Interceptor de tráfico HTTP/HTTPS self-hosted. Alternativa open source a Burp S
 
 Arquitectura y decisiones en [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
+![History: tráfico en vivo con visor de request/response](docs/screenshots/janus-history.png)
+
+| Intercept | Repeater | Tema claro |
+| --- | --- | --- |
+| ![Intercept con requests retenidos y uno editado](docs/screenshots/janus-intercept.png) | ![Repeater con la respuesta formateada](docs/screenshots/janus-repeater.png) | ![History en tema claro](docs/screenshots/janus-history-light.png) |
+
 ## Qué hace
 
 | Vista | Para qué |
@@ -44,6 +50,7 @@ backend\.venv\Scripts\pip install -r backend\requirements-dev.txt
 | `npm run dev` | App Tauri en modo desarrollo. Necesita el sidecar congelado (correr `backend:build` una vez); con `$env:JANUS_BACKEND_PYTHON="backend\.venv\Scripts\python.exe"` usa el backend desde el código. |
 | `npm run build` | Sidecar + app + instalador → `src-tauri\target\release\bundle\nsis\Janus_0.1.0_x64-setup.exe`. |
 | `backend\.venv\Scripts\python -m pytest backend\tests` | Tests (unitarios + end-to-end con proxy real). |
+| `backend\.venv\Scripts\python scripts\smoke-sidecar.py` | Prueba el motor congelado como lo lanza Tauri (pipes, handshake, proxy y apagado). Correrlo después de `backend:build`. |
 
 En Linux es igual, con `backend/.venv/bin/python` y las dependencias de sistema de Tauri (`libwebkit2gtk-4.1-dev`, etc.).
 

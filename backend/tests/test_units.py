@@ -153,3 +153,22 @@ def test_settings_validation():
     with pytest.raises(SettingsError):
         s.validate_update({"proxy.upstream": "ftp://x"})
     assert s.validate_update({"proxy.upstream": "http://10.0.0.1:3128"})["proxy.upstream"] == "http://10.0.0.1:3128"
+
+
+# --- repeater -----------------------------------------------------------------------
+
+def test_repeater_tab_names_do_not_repeat(tmp_path):
+    from janus import repeater
+    from janus.db import Database
+
+    db = Database(tmp_path / "t.sqlite3")
+    try:
+        def make(conn):
+            return repeater.create_tab(conn, name=None, host="t", port=443, tls=True,
+                                       raw_request=b"GET / HTTP/1.1\r\n\r\n", encoding="utf-8", orig_body=None)
+        a, b, c = (db.write_sync(make) for _ in range(3))
+        assert [a["name"], b["name"], c["name"]] == ["1", "2", "3"]
+        db.write_sync(repeater.delete_tab, b["id"])
+        assert db.write_sync(make)["name"] == "4"
+    finally:
+        db.close()

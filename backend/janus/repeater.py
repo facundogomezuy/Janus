@@ -51,8 +51,10 @@ def get_tab(conn, tab_id: int) -> dict | None:
 
 
 def _next_name(conn) -> str:
-    n = conn.execute("SELECT COUNT(*) AS c FROM repeater_tabs WHERE project_id = 1").fetchone()["c"]
-    return str(n + 1)
+    """Siguiente número libre (no se repite al cerrar pestañas del medio)."""
+    names = conn.execute("SELECT name FROM repeater_tabs WHERE project_id = 1").fetchall()
+    used = [int(r["name"]) for r in names if r["name"].isdigit()]
+    return str(max(used, default=0) + 1)
 
 
 def create_tab(conn, *, name: str | None, host: str, port: int, tls: bool,

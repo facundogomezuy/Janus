@@ -12,6 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -124,6 +125,19 @@ def _bad_request(exc: Exception) -> HTTPException:
     return HTTPException(status_code=400, detail=str(exc))
 
 
+def _browser_url(raw: str | None) -> str | None:
+    """URL inicial del navegador Janus: solo http(s), así nunca llega como flag."""
+    url = (raw or "").strip()
+    if not url:
+        return None
+    if "://" not in url:
+        url = "https://" + url
+    parts = urlsplit(url)
+    if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
+        raise HTTPException(status_code=400, detail="la URL inicial tiene que ser http:// o https://")
+    return url
+
+
 def _open_path(path: Path) -> None:
     if sys.platform == "win32":
         os.startfile(path)  # noqa: S606 - abre el Explorador en esa carpeta
@@ -162,7 +176,7 @@ def create_app(core: Core, *, frontend_dir: Path | None = None, on_shutdown=None
         return {"ok": True}
 
     @app.post("/api/shutdown", dependencies=guard)
-    def shutdown() -> dict:
+    async def shutdown() -> dict:
         if on_shutdown:
             asyncio.get_running_loop().call_soon(on_shutdown)
         return {"ok": True}
@@ -234,8 +248,11 @@ def create_app(core: Core, *, frontend_dir: Path | None = None, on_shutdown=None
 
     # --- intercept ----------------------------------------------------------------
 
+    # Los endpoints de intercept son `async` a propósito: corren en el event loop
+    # de mitmproxy. `flow.resume()` hace `asyncio.Event.set()`, que no es seguro
+    # desde los hilos donde FastAPI corre los endpoints sincrónicos.
     @app.get("/api/intercept", dependencies=guard)
-    def get_intercept() -> dict:
+    async def get_intercept() -> dict:
         return {**core.interceptor.state(), "queue": core.interceptor.items()}
 
     @app.put("/api/intercept", dependencies=guard)
@@ -246,17 +263,17 @@ def create_app(core: Core, *, frontend_dir: Path | None = None, on_shutdown=None
             raise _bad_request(exc) from exc
 
     @app.post("/api/intercept/forward-all", dependencies=guard)
-    def forward_all() -> dict:
+    async def forward_all() -> dict:
         core.interceptor.forward_all()
         return core.interceptor.state()
 
     @app.post("/api/intercept/drop-all", dependencies=guard)
-    def drop_all() -> dict:
+    async def drop_all() -> dict:
         core.interceptor.drop_all()
         return core.interceptor.state()
 
     @app.post("/api/intercept/{flow_id}/forward", dependencies=guard)
-    def forward(flow_id: str, body: ForwardBody | None = None) -> dict:
+    async def forward(flow_id: str, body: ForwardBody | None = None) -> dict:
         body = body or ForwardBody()
         try:
             core.interceptor.forward(
@@ -271,7 +288,7 @@ def create_app(core: Core, *, frontend_dir: Path | None = None, on_shutdown=None
         return {"ok": True}
 
     @app.post("/api/intercept/{flow_id}/drop", dependencies=guard)
-    def drop(flow_id: str) -> dict:
+    async def drop(flow_id: str) -> dict:
         try:
             core.interceptor.drop(flow_id)
         except KeyError as exc:
@@ -294,8 +311,6 @@ def create_app(core: Core, *, frontend_dir: Path | None = None, on_shutdown=None
 
     @app.post("/api/scope/test", dependencies=guard)
     def test_scope(body: ScopeTest) -> dict:
-        from urllib.parse import urlsplit
-
         raw = body.url.strip()
         if "://" not in raw:
             raw = "https://" + raw
@@ -410,14 +425,13 @@ def create_app(core: Core, *, frontend_dir: Path | None = None, on_shutdown=None
 
     @app.post("/api/browsers/launch", dependencies=guard)
     async def launch_browser(body: BrowserLaunch) -> dict:
+        _browser_url(body.url)  # validar antes de buscar navegadores
         found = await asyncio.to_thread(browsers.detect)
         if not found:
             raise HTTPException(status_code=404, detail="no se encontró Chrome, Edge, Brave ni Firefox")
         chosen = next((b for b in found if b.id == body.id), None) if body.id else None
         chosen = chosen or next((b for b in found if b.engine == "chromium"), found[0])
-        url = body.url.strip() if body.url else None
-        if url and "://" not in url:
-            url = "https://" + url
+        url = _browser_url(body.url)
         s = core.settings
         spki = ca.spki_sha256_b64(ca.load_cert(core.confdir))
         try:

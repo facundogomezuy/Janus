@@ -91,8 +91,9 @@ export function createSetup(app) {
   function renderCa() {
     if (!ca) return;
     const installed = ca.installed;
-    caStatus.className = `badge ${installed ? "solid-ok" : installed === false ? "solid-err" : ""}`;
-    caStatus.textContent = installed ? "Instalada" : installed === false ? "No instalada" : "—";
+    caStatus.className = `badge ${installed ? "solid-ok" : "solid-err"}`;
+    caStatus.textContent = installed ? "Instalada" : "No instalada";
+    caStatus.hidden = installed == null; // fuera de Windows no se puede saber
     const until = new Date(ca.not_after);
     caKv.replaceChildren(
       h("dt", "Nombre"), h("dd", ca.cn || "—"),
