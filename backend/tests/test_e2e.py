@@ -110,6 +110,30 @@ def _start_target(tls_files: tuple[Path, Path] | None = None) -> tuple[Threading
     return srv, srv.server_address[1]
 
 
+def _start_raw_target() -> tuple[socket.socket, int]:
+    """Servidor TCP que contesta bytes que no son HTTP (estilo 0.9) y cierra."""
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(8)
+
+    def serve():
+        while True:
+            try:
+                conn, _ = srv.accept()
+            except OSError:
+                return
+            with conn:
+                conn.settimeout(5)
+                try:
+                    conn.recv(65536)
+                    conn.sendall(b"<html>no soy HTTP</html>\n")
+                except OSError:
+                    pass
+
+    threading.Thread(target=serve, daemon=True).start()
+    return srv, srv.getsockname()[1]
+
+
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -199,9 +223,11 @@ def targets(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("targets")
     http_srv, http_port = _start_target()
     https_srv, https_port = _start_target(_self_signed(tmp))
-    yield {"http": http_port, "https": https_port}
+    raw_srv, raw_port = _start_raw_target()
+    yield {"http": http_port, "https": https_port, "raw": raw_port}
     http_srv.shutdown()
     https_srv.shutdown()
+    raw_srv.close()
 
 
 @pytest.fixture(scope="module")
@@ -425,7 +451,7 @@ def test_repeater_chunked_tls_and_errors(janus, targets):
     assert res["response"]["status_code"] == 501
     # respuesta que no es HTTP (estilo 0.9): error legible y bytes crudos igual
     _, res = api.post(f"/api/repeater/tabs/{tab['id']}/send", {
-        "host": "127.0.0.1", "port": targets["http"], "tls": False, "message": {"text": "BROKEN\n\n"},
+        "host": "127.0.0.1", "port": targets["raw"], "tls": False, "message": {"text": raw},
     })
     assert res["ok"] is False and "no es HTTP" in res["error"] and res["raw_b64"]
     # puerto cerrado: error legible, no excepción
