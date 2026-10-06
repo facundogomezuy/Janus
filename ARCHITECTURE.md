@@ -167,30 +167,35 @@ Instalar la CA en cada almacén de certificados (Windows, Linux, y Firefox que u
 janus/
 ├─ backend/
 │  ├─ janus/
-│  │  ├─ main.py            # entrypoint: args, arranca el loop
-│  │  ├─ server.py          # FastAPI + uvicorn
-│  │  ├─ proxy/
-│  │  │  ├─ master.py       # setup del Master de mitmproxy
-│  │  │  └─ addon.py        # JanusAddon (hooks)
-│  │  ├─ intercept.py       # cola/manager de intercept
-│  │  ├─ history.py         # servicio + queries de historial
-│  │  ├─ scope.py           # matching de scope
-│  │  ├─ repeater.py        # usa rawhttp
+│  │  ├─ main.py            # entrypoint: args, loop, handshake, apagado ordenado
+│  │  ├─ core.py            # une el Master de mitmproxy con los servicios
+│  │  ├─ server.py          # FastAPI: REST + WebSocket (+ frontend en standalone)
+│  │  ├─ proxy/addon.py     # JanusAddon (hooks -> Core)
+│  │  ├─ intercept.py       # cola de flows retenidos, forward/drop/edición
+│  │  ├─ history.py         # flows <-> SQLite, detalle, export curl
+│  │  ├─ scope.py           # patrones, include/exclude, ignore_hosts
+│  │  ├─ repeater.py        # pestañas persistidas
 │  │  ├─ rawhttp.py         # cliente crudo socket/TLS
-│  │  ├─ db.py              # SQLite + schema
-│  │  ├─ ca.py              # export de CA + instrucciones
-│  │  ├─ auth.py            # token
-│  │  └─ ws.py              # hub de websockets
-│  ├─ pyproject.toml
-│  └─ janus.spec            # PyInstaller
-├─ frontend/                # SPA (recomiendo Svelte + Vite, o React)
-│  ├─ src/
-│  ├─ package.json
-│  └─ vite.config.*
+│  │  ├─ httpmsg.py         # parseo/armado de mensajes, cuerpos, CRLF
+│  │  ├─ db.py              # SQLite + schema (1 hilo escritor, lectores en pool)
+│  │  ├─ ca.py              # CA propia + almacén de Windows (crypt32)
+│  │  ├─ browsers.py        # navegador dedicado (Chrome/Edge/Brave/Firefox)
+│  │  ├─ sysproxy.py        # proxy del sistema en Windows (WinINet) con backup
+│  │  ├─ loopback.py        # `localhost` sin la demora de ::1 en Windows
+│  │  ├─ events.py          # eventos del proxy para la UI
+│  │  ├─ settings.py, paths.py, auth.py, ws.py
+│  ├─ tests/                # unitarios + end-to-end con proxy real
+│  ├─ janus.spec            # PyInstaller (sidecar onefile, sin WinDivert)
+│  └─ pyproject.toml / requirements*.txt
+├─ frontend/                # ES modules sin build step (Tauri sirve la carpeta tal cual)
+│  ├─ index.html, css/app.css
+│  └─ js/ main.js, api.js, dom.js, http.js, editor.js, viewer.js, panels.js, views/*.js
 ├─ src-tauri/
-│  ├─ src/main.rs
+│  ├─ src/main.rs           # sidecar, handshake, ciclo de vida, instancia única
+│  ├─ capabilities/default.json
 │  ├─ tauri.conf.json
-│  └─ Cargo.toml
+│  └─ icons/                # app-icon.svg (fuente) + generados
+├─ scripts/                 # build-backend.mjs, run-backend.mjs
 ├─ .github/workflows/build.yml
 ├─ ARCHITECTURE.md
 └─ README.md
@@ -213,8 +218,34 @@ Vertical slice primero, features después: se front-loadea la plomería riesgosa
 
 **v2 — Intruder/fuzzing:** se apoya en `rawhttp` + un motor de payloads (wordlists) + reporte. El modelo de request ya está listo desde M4.
 
+**Estado (v0.1.0):** M0–M5 implementados. Instalador NSIS para Windows y build de Linux por CI.
+
 ---
 
 ## 13. Fuera de alcance (v1)
 
 Decoder, escáner de vulnerabilidades automático, extensiones/plugins de terceros, colaboración multiusuario, y **cualquier integración con IA**. La arquitectura queda abierta a sumar después un plugin de IA, pero no es parte de este alcance.
+
+---
+
+## 14. Decisiones de implementación (v0.1)
+
+Lo que se definió al construir M1–M5, sobre todo para Windows.
+
+**Motor y API en un loop.** `core.Core` arma el `Master` con los addons por defecto + `JanusAddon`. El puerto del proxy va dentro del modo (`regular@127.0.0.1:8080`): mitmproxy solo reinicia los listeners cuando cambia `mode`, así que el puerto se puede cambiar en caliente desde Ajustes. Los errores de escucha se traducen (puerto ocupado, rango reservado por Hyper-V/WSL).
+
+**Handshake y ciclo de vida.** El backend bindea el socket de la API antes de arrancar (sin la carrera de "puerto libre") e imprime `JANUS_READY` recién cuando la API y el proxy están listos. Con `--sidecar` vigila stdin: Tauri manda `shutdown` al salir y espera; si Tauri muere, el pipe da EOF. En ambos casos el apagado es ordenado (restaura el proxy del sistema, libera flows retenidos) y PyInstaller limpia su directorio temporal.
+
+**Frontend.** Lo sirve Tauri (`http://tauri.localhost` en Windows) y le habla a la API por CORS con el token. En standalone lo sirve el backend y el token llega en el `#hash`. Sin build step: ES modules. El tipo MIME de `.js` se fuerza porque Windows a veces lo registra como `text/plain` y los módulos no cargan.
+
+**Intercept.** Para el drop se hace `resume()` + `kill()` en el mismo tick (`Flow.kill()` solo no despierta al hook). El editor muestra el cuerpo decodificado (gzip/br/zstd) y lo recodifica si se edita. Si el cuerpo no cambió, se reusan los bytes originales: el textarea normaliza `\r\n` a `\n` y, si no, se romperían cuerpos multipart o binarios.
+
+**Repeater.** Las cabeceras se mandan tal cual se escribieron; solo se reescribe `Content-Length` si se pide. Mismo truco de bytes originales para el cuerpo, y CRLF forzado en multipart.
+
+**CA.** Se genera con nombre propio ("Janus Interception CA") antes de que arranque mitmproxy. En Windows se instala en *Raíz del usuario actual* vía `crypt32` (sin admin; Windows pide confirmación). El navegador dedicado la acepta por huella SPKI (`--ignore-certificate-errors-spki-list`), así que funciona incluso sin instalarla.
+
+**Windows, detalles.**
+- `localhost` se resuelve probando `127.0.0.1` y `::1` en paralelo (hook `server_connect`); sin esto, cada request a un server local IPv4 pagaba ~2 s.
+- El sidecar se congela sin WinDivert ni `windows-redirector.exe`: no se usan los modos transparente/local, y así hay menos falsos positivos de antivirus.
+- El proxy del sistema guarda un backup en disco y se restaura en el próximo arranque si Janus se cerró de golpe.
+- La ventana es sin marco, con barra de título propia, sombra y esquinas de Windows 11. `backgroundColor` evita el destello blanco de WebView2 al abrir.

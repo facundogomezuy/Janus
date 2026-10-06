@@ -1,35 +1,41 @@
-"""JanusAddon — hooks de mitmproxy. STUB para M1.
+"""JanusAddon — hooks de mitmproxy (ARCHITECTURE.md §3).
 
-Todavía no está cableado al Master (eso es lo primero de M1). Queda acá el
-esqueleto con los hooks y las decisiones ya documentadas en ARCHITECTURE.md §3,
-para que cuando se conecte solo haya que rellenar los cuerpos, no rediseñar.
-
-Modelo de intercept: mitmproxy retiene un flow con `flow.intercept()` y lo libera
-con `flow.resume()`. El endpoint de la API muta `flow.request`/`flow.response`
-con los bytes editados y recién ahí resume.
+El addon es fino a propósito: traduce eventos de mitmproxy a llamadas al Core,
+que es quien sabe de historial, scope, intercept y WebSocket.
 """
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:  # evita importar mitmproxy hasta que M1 lo agregue como dep
+if TYPE_CHECKING:
+    from mitmproxy import tls
     from mitmproxy.http import HTTPFlow
+    from mitmproxy.proxy.server_hooks import ServerConnectionHookData
+
+    from ..core import Core
 
 
 class JanusAddon:
-    def __init__(self) -> None:
-        # En M1: referencias a los servicios (history, scope, intercept, ws hub).
-        self.intercept_enabled: bool = False
-        self.intercept_scope: str = "request"  # request | response | both
+    def __init__(self, core: Core) -> None:
+        self.core = core
 
-    def request(self, flow: "HTTPFlow") -> None:
-        # TODO(M1):
-        #   1. evaluar scope (in_scope) — ver scope.py
-        #   2. si intercept on y en scope: flow.intercept(); encolar; emitir intercept.pending
-        #   3. emitir flow.new + persistir en SQLite
-        raise NotImplementedError
+    def running(self) -> None:
+        self.core.on_proxy_running()
 
-    def response(self, flow: "HTTPFlow") -> None:
-        # TODO(M1): idem para responses si intercept_scope incluye 'response';
-        #           actualizar el flow en SQLite + emitir flow.complete
-        raise NotImplementedError
+    async def server_connect(self, data: ServerConnectionHookData) -> None:
+        await self.core.on_server_connect(data)
+
+    def request(self, flow: HTTPFlow) -> None:
+        self.core.on_request(flow)
+
+    def response(self, flow: HTTPFlow) -> None:
+        self.core.on_response(flow)
+
+    def error(self, flow: HTTPFlow) -> None:
+        self.core.on_error(flow)
+
+    def tls_failed_client(self, data: tls.TlsData) -> None:
+        self.core.on_tls_failed(data, side="client")
+
+    def tls_failed_server(self, data: tls.TlsData) -> None:
+        self.core.on_tls_failed(data, side="server")

@@ -1,33 +1,42 @@
-"""Autenticación de la API local.
+"""Autenticación de la API local (ARCHITECTURE.md §8).
 
 El backend genera un token al arrancar y lo entrega a Tauri por el handshake
-de stdout. El frontend lo manda en cada request como `Authorization: Bearer <token>`.
-Sin token válido → 401. Esto corta que cualquier web abierta en el navegador
+de stdout. El frontend lo manda en cada request como ``Authorization: Bearer``
+(o ``?token=`` en descargas y en el WebSocket, que no pueden llevar headers).
+Sin token válido -> 401. Esto corta que cualquier web abierta en el navegador
 del usuario le pegue a la API local (DNS-rebinding y similares).
 
-En modo dev standalone (env JANUS_DEV=1) el chequeo se saltea, así se puede
-abrir el frontend directo sin el shell de Tauri mientras se trabaja la base.
+``JANUS_DEV=1`` saltea el chequeo (solo para trabajar la UI suelta).
 """
 from __future__ import annotations
 
 import os
 import secrets
 
-from fastapi import Header, HTTPException, status
+from fastapi import Header, HTTPException, Query, status
 
-# Token de sesión. Se fija una vez por proceso.
 API_TOKEN: str = secrets.token_urlsafe(32)
 
-# Modo desarrollo: saltea el chequeo de token para poder abrir el front suelto.
 DEV_MODE: bool = os.environ.get("JANUS_DEV") == "1"
 
 
-def require_token(authorization: str | None = Header(default=None)) -> None:
-    """Dependencia de FastAPI que valida el Bearer token."""
+def valid(token: str | None) -> bool:
     if DEV_MODE:
-        return
-    expected = f"Bearer {API_TOKEN}"
-    if authorization != expected:
+        return True
+    return bool(token) and secrets.compare_digest(token, API_TOKEN)  # type: ignore[arg-type]
+
+
+def require_token(
+    authorization: str | None = Header(default=None),
+    token: str | None = Query(default=None),
+) -> None:
+    """Dependencia de FastAPI que valida el token."""
+    supplied = None
+    if authorization and authorization.startswith("Bearer "):
+        supplied = authorization[7:]
+    elif token:
+        supplied = token
+    if not valid(supplied):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="token inválido o ausente",

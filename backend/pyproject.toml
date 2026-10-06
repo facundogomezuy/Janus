@@ -1,14 +1,16 @@
 [project]
 name = "janus-backend"
-version = "0.0.1"
+version = "0.1.0"
 description = "Backend del interceptor de tráfico HTTP/HTTPS Janus"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 dependencies = [
-    "fastapi>=0.110",
-    "uvicorn>=0.29",
-    # Motor de interceptación. Se usa a partir de M1.
-    "mitmproxy>=11.0",
+    "mitmproxy>=12.2,<13",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pyinstaller>=6.16"]
 
 [project.scripts]
 janus-backend = "janus.main:main"
@@ -19,3 +21,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["janus", "janus.proxy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

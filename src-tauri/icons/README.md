@@ -1,11 +1,9 @@
 # Iconos de la app (Tauri)
 
-Faltan los binarios de icono que Tauri empaqueta por plataforma:
-`32x32.png`, `128x128.png`, `icon.ico` (Windows), `icon.icns` (macOS).
+`app-icon.svg` es la fuente: un cuadrado redondeado oscuro con la marca de Janus.
+El resto de los archivos (`icon.ico`, `icon.icns`, `*.png`) se generan a partir de él:
 
-Generalos a partir del logo con el CLI de Tauri, apuntando al mark:
+    npm run icons
 
-    cargo tauri icon ../frontend/assets/janus-mark.svg
-
-Eso llena esta carpeta con todos los tamaños/formatos que pide `tauri.conf.json`.
-(El SVG del mark ya está en `frontend/assets/` y no depende de nada externo.)
+(equivale a `tauri icon src-tauri/icons/app-icon.svg`). Si regenerás, borrá las
+carpetas `android/` e `ios/` que crea el CLI: Janus es solo de escritorio.

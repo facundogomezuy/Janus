@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Ícono de la app: fuente para `npm run icons` (genera .ico/.png/.icns). -->
+  <defs>
+    <linearGradient id="bg" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#18241f"/>
+      <stop offset="0.55" stop-color="#0f1513"/>
+      <stop offset="1" stop-color="#080b0d"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.44" r="0.56">
+      <stop offset="0" stop-color="#1D9E75" stop-opacity="0.42"/>
+      <stop offset="0.6" stop-color="#1D9E75" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#1D9E75" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5fe0b4"/>
+      <stop offset="1" stop-color="#1fae80"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.02"/>
+    </linearGradient>
+  </defs>
+  <rect x="48" y="48" width="928" height="928" rx="214" fill="url(#bg)"/>
+  <rect x="48" y="48" width="928" height="928" rx="214" fill="url(#glow)"/>
+  <rect x="50" y="50" width="924" height="924" rx="212" fill="none" stroke="url(#rim)" stroke-width="4"/>
+  <g transform="translate(512 512) scale(11.6) translate(-32 -32)" fill="none" stroke="url(#mark)" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="32" cy="32" r="22" stroke-width="4.4"/>
+    <path d="M27,23 L20,32 L27,41" stroke-width="3.6"/>
+    <path d="M37,23 L44,32 L37,41" stroke-width="3.6"/>
+    <path d="M33,25.5 L27.5,32 L33,38.5" stroke-width="2.6" stroke-opacity="0.55"/>
+    <path d="M31,25.5 L36.5,32 L31,38.5" stroke-width="2.6" stroke-opacity="0.55"/>
+  </g>
+</svg>
