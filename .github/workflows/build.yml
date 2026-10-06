@@ -18,8 +18,8 @@ jobs:
         os: [windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
           cache: pip
@@ -44,15 +44,15 @@ jobs:
             bundles: deb,appimage
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
           cache: pip
           cache-dependency-path: backend/requirements*.txt
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -79,6 +79,10 @@ jobs:
         run: npm run backend:build
         env:
           JANUS_PYTHON: python
+
+      # El .exe sin consola tiene que hablar por los pipes que usa Tauri.
+      - name: Prueba de humo del sidecar
+        run: python scripts/smoke-sidecar.py
 
       - name: Build de la app (Tauri)
         run: npx tauri build --bundles ${{ matrix.bundles }}
