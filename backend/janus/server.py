@@ -162,7 +162,7 @@ def create_app(core: Core, *, frontend_dir: Path | None = None, on_shutdown=None
         return {"ok": True}
 
     @app.post("/api/shutdown", dependencies=guard)
-    def shutdown() -> dict:
+    async def shutdown() -> dict:
         if on_shutdown:
             asyncio.get_running_loop().call_soon(on_shutdown)
         return {"ok": True}
@@ -234,8 +234,11 @@ def create_app(core: Core, *, frontend_dir: Path | None = None, on_shutdown=None
 
     # --- intercept ----------------------------------------------------------------
 
+    # Los endpoints de intercept son `async` a propósito: corren en el event loop
+    # de mitmproxy. `flow.resume()` hace `asyncio.Event.set()`, que no es seguro
+    # desde los hilos donde FastAPI corre los endpoints sincrónicos.
     @app.get("/api/intercept", dependencies=guard)
-    def get_intercept() -> dict:
+    async def get_intercept() -> dict:
         return {**core.interceptor.state(), "queue": core.interceptor.items()}
 
     @app.put("/api/intercept", dependencies=guard)
@@ -246,17 +249,17 @@ def create_app(core: Core, *, frontend_dir: Path | None = None, on_shutdown=None
             raise _bad_request(exc) from exc
 
     @app.post("/api/intercept/forward-all", dependencies=guard)
-    def forward_all() -> dict:
+    async def forward_all() -> dict:
         core.interceptor.forward_all()
         return core.interceptor.state()
 
     @app.post("/api/intercept/drop-all", dependencies=guard)
-    def drop_all() -> dict:
+    async def drop_all() -> dict:
         core.interceptor.drop_all()
         return core.interceptor.state()
 
     @app.post("/api/intercept/{flow_id}/forward", dependencies=guard)
-    def forward(flow_id: str, body: ForwardBody | None = None) -> dict:
+    async def forward(flow_id: str, body: ForwardBody | None = None) -> dict:
         body = body or ForwardBody()
         try:
             core.interceptor.forward(
@@ -271,7 +274,7 @@ def create_app(core: Core, *, frontend_dir: Path | None = None, on_shutdown=None
         return {"ok": True}
 
     @app.post("/api/intercept/{flow_id}/drop", dependencies=guard)
-    def drop(flow_id: str) -> dict:
+    async def drop(flow_id: str) -> dict:
         try:
             core.interceptor.drop(flow_id)
         except KeyError as exc:
