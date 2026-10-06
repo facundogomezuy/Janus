@@ -1,7 +1,7 @@
 // Vista History: tabla virtualizada + detalle request/response.
 
 import {
-  confirmDialog, copyText, debounce, emptyState, esc, fmtBytes, fmtClock, fmtInt, fmtMs, h, icon,
+  confirmDialog, copyText, debounce, emptyState, esc, fmtBytes, fmtClock, fmtFlows, fmtInt, fmtMs, h, icon,
   methodClass, openMenu, persist, promptDialog, split, statusClass, store, toast,
 } from "../dom.js";
 import { contentKind } from "../http.js";
@@ -337,8 +337,10 @@ export function createHistory(app) {
     spacer.insertAdjacentHTML("afterend", html);
     fresh.clear();
     const filtered = view.length !== flows.length;
-    countLbl.textContent = filtered ? `${fmtInt(view.length)} de ${fmtInt(flows.length)}` : `${fmtInt(flows.length)} flows`;
+    countLbl.textContent = filtered ? `${fmtInt(view.length)} de ${fmtInt(flows.length)}` : fmtFlows(flows.length);
     if (total > flows.length) countLbl.textContent += ` (últimos de ${fmtInt(total)})`;
+    // sin tráfico todavía: la bienvenida ocupa toda la vista (no hay detalle que mostrar)
+    main.classList.toggle("solo", loaded && !flows.length);
     // vacíos
     if (!loaded) {
       emptyHost.hidden = true;

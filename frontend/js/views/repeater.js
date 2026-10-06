@@ -268,7 +268,11 @@ export function createRepeater(app) {
     btn.replaceChildren(input);
     input.focus();
     input.select();
+    let finished = false;
     const done = async (commit) => {
+      // Enter/Escape re-renderizan la tira, lo que saca el input y dispara blur: una sola vez
+      if (finished) return;
+      finished = true;
       const name = input.value.trim();
       if (commit && name && name !== t.name) {
         t.name = name;

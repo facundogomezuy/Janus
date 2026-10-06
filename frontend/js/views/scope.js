@@ -19,14 +19,14 @@ export function createScope(app) {
   paintKind();
 
   const testIn = h("input.input.mono", { placeholder: "Probá una URL: https://api.target.com/v1/users", spellcheck: false });
-  const testOut = h("span.result-chip", "—");
+  const testOut = h("span.result-chip", { hidden: true });
   const runTest = debounce(async () => {
     const url = testIn.value.trim();
     if (!url) {
-      testOut.className = "result-chip";
-      testOut.replaceChildren("—");
+      testOut.hidden = true;
       return;
     }
+    testOut.hidden = false;
     try {
       const r = await app.api.post("/api/scope/test", { url });
       testOut.className = `result-chip ${r.in_scope ? "in" : "out"}`;

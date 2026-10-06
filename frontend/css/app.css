@@ -382,6 +382,8 @@ select.input { padding-right: 26px; appearance: none;
 .split.h > .gutter::after { inset: 0 -4px; }
 .split.v > .gutter::after { inset: -4px 0; }
 .gutter:hover, .gutter.dragging { background: var(--teal); }
+.split.solo > .gutter, .split.solo > .pane-b { display: none !important; }
+.split.solo > .pane-a { flex: 1 1 auto !important; }
 body.resizing-h, body.resizing-h * { cursor: col-resize !important; }
 body.resizing-v, body.resizing-v * { cursor: row-resize !important; }
 
@@ -731,7 +733,8 @@ button.sb-item:hover { background: var(--hover); color: var(--text); }
 @media (max-width: 1100px) {
   .nav-tab .lbl { display: none; }
   .nav-tab { padding: 0 9px; }
-  .pill .lbl-long { display: none; }
+  .pill .lbl-long, .toolbar .btn .lbl-long { display: none; }
+  .toolbar .btn:has(.lbl-long) { padding: 0 9px; }
 }
 @media (max-width: 760px) {
   .brand .name { display: none; }

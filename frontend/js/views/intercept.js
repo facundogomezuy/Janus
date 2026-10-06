@@ -18,11 +18,13 @@ export function createIntercept(app) {
   const scopeChk = h("input", { type: "checkbox" });
   const filter = h("input.input.mono", {
     placeholder: "Filtro avanzado (mitmproxy): ~d target.com & ~m POST",
-    spellcheck: false, style: { width: "320px" },
+    spellcheck: false, style: { flex: "0 1 320px", minWidth: "150px" },
     title: "Sintaxis de filtros de mitmproxy: ~d dominio · ~m método · ~u url · ~h header · ~b cuerpo · & | !",
   });
-  const fwdAll = h("button.btn", { onclick: () => bulk("forward-all") }, icon("forward"), "Forward todo");
-  const dropAll = h("button.btn.danger", { onclick: () => bulk("drop-all") }, icon("ban"), "Drop todo");
+  const fwdAll = h("button.btn", { title: "Forward de todos los retenidos", onclick: () => bulk("forward-all") },
+    icon("forward"), h("span.lbl-long", "Forward todo"));
+  const dropAll = h("button.btn.danger", { title: "Drop de todos los retenidos", onclick: () => bulk("drop-all") },
+    icon("ban"), h("span.lbl-long", "Drop todo"));
   const toolbar = h("div.toolbar",
     stateBox, h("span.sep"),
     h("label.check", reqChk, "Requests"),
