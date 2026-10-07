@@ -127,6 +127,7 @@ def _bad_request(exc: Exception) -> HTTPException:
 
 
 _SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 
 def _parse_url(raw: str, *, error: str) -> tuple[str, SplitResult, int]:
@@ -137,12 +138,16 @@ def _parse_url(raw: str, *, error: str) -> tuple[str, SplitResult, int]:
     sin esquema, no una URL rara.
     """
     url = raw.strip()
-    # urlsplit descarta \t\r\n en silencio (se validaría otra URL que la que se
-    # lanza) y un NUL rompe Popen: los caracteres de control no van
-    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in url):
-        raise HTTPException(status_code=400, detail=error)
     if not _SCHEME_RE.match(url):
         url = "https://" + url
+    # urlsplit descarta \t\r\n en silencio (se validaría otra URL que la que se
+    # lanza) y un NUL rompe Popen. En el host no van; en path/query/fragmento
+    # (un flow capturado puede traerlos) se codifican como %XX.
+    scheme_end = url.index("://") + 3
+    cut = next((i for i in range(scheme_end, len(url)) if url[i] in "/?#"), len(url))
+    if _CONTROL_RE.search(url, 0, cut):
+        raise HTTPException(status_code=400, detail=error)
+    url = url[:cut] + _CONTROL_RE.sub(lambda m: f"%{ord(m.group()):02X}", url[cut:])
     try:
         parts = urlsplit(url)
         host, port = parts.hostname, parts.port

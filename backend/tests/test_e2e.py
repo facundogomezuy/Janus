@@ -597,7 +597,7 @@ def test_browser_launch_rejects_non_http_urls(janus):
     """La URL inicial va como argumento al navegador: nunca debe poder ser un flag."""
     for bad in ("--disable-web-security://x", "file:///etc/passwd", "javascript://alert(1)",
                 "http://[::1", "https://[foo]/", "http://target.com:99999/",
-                "https://x.com/\u0000", "x.com\n--flag"):
+                "https://x.\u0000com/", "x.com\n--flag"):
         status, data = janus.api.post("/api/browsers/launch", {"url": bad})
         assert status == 400 and "http" in data["detail"], (bad, status, data)
 
@@ -607,6 +607,9 @@ def test_scope_tester_accepts_urls_without_scheme(janus):
     status, data = janus.api.post("/api/scope/test", {"url": "target.com/cb?redirect=https://target.com/home"})
     assert status == 200 and data["in_scope"] is True, data
     assert janus.api.post("/api/scope/test", {"url": "http://[::1"})[0] == 400
+    # bytes de control en el path (un flow capturado puede traerlos): se codifican, no son error
+    status, data = janus.api.post("/api/scope/test", {"url": "https://target.com/a\u0001b?q=\u007f"})
+    assert status == 200, data
 
 
 def test_api_shutdown_exits_cleanly(tmp_path):
