@@ -18,7 +18,7 @@ export function createIntercept(app) {
   const scopeChk = h("input", { type: "checkbox" });
   const filter = h("input.input.mono", {
     placeholder: "Filtro avanzado (mitmproxy): ~d target.com & ~m POST",
-    spellcheck: false, style: { flex: "0 1 320px", minWidth: "150px" },
+    spellcheck: false, style: { flex: "1 1 150px", maxWidth: "320px", minWidth: "150px" },
     title: "Sintaxis de filtros de mitmproxy: ~d dominio · ~m método · ~u url · ~h header · ~b cuerpo · & | !",
   });
   const fwdAll = h("button.btn", { title: "Forward de todos los retenidos", onclick: () => bulk("forward-all") },

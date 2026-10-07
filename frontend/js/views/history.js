@@ -114,6 +114,7 @@ export function createHistory(app) {
   const fresh = new Set();
   let loaded = false;
   let total = 0;
+  let visible = 0; // flows que no son ruido oculto del navegador
 
   // --- toolbar --------------------------------------------------------------------
   const search = h("input.input", {
@@ -199,6 +200,7 @@ export function createHistory(app) {
 
   function recompute() {
     view = flows.filter(passes);
+    visible = filters.hideNoise ? flows.reduce((n, f) => n + (isNoise(f) ? 0 : 1), 0) : flows.length;
     if (!(sort.key === "seq" && sort.dir === 1)) view.sort(compare);
     dirty = false;
   }
@@ -339,16 +341,20 @@ export function createHistory(app) {
     const filtered = view.length !== flows.length;
     countLbl.textContent = filtered ? `${fmtInt(view.length)} de ${fmtInt(flows.length)}` : fmtFlows(flows.length);
     if (total > flows.length) countLbl.textContent += ` (últimos de ${fmtInt(total)})`;
-    // sin tráfico todavía: la bienvenida ocupa toda la vista (no hay detalle que mostrar)
-    main.classList.toggle("solo", loaded && !flows.length);
+    // sin tráfico todavía (o solo ruido del navegador, que está oculto): la
+    // bienvenida ocupa toda la vista, no hay detalle que mostrar
+    const noTraffic = loaded && !visible;
+    main.classList.toggle("solo", noTraffic);
     // vacíos
     if (!loaded) {
       emptyHost.hidden = true;
-    } else if (!flows.length) {
+    } else if (noTraffic) {
+      const hiddenNoise = flows.length - visible;
       showEmpty(emptyState({
         icon: "globe",
         title: "Todavía no pasó tráfico por Janus",
-        text: `Abrí el navegador Janus (ya viene configurado) o apuntá tu navegador o app al proxy ${app.proxyAddress()}.`,
+        text: `Abrí el navegador Janus (ya viene configurado) o apuntá tu navegador o app al proxy ${app.proxyAddress()}.`
+          + (hiddenNoise ? ` Hay ${fmtInt(hiddenNoise)} request${hiddenNoise === 1 ? "" : "s"} interno${hiddenNoise === 1 ? "" : "s"} del navegador oculto${hiddenNoise === 1 ? "" : "s"} (Vista → Tráfico interno del navegador).` : ""),
         actions: [
           h("button.btn.primary", { onclick: () => app.launchBrowser() }, icon("globe"), "Abrir navegador Janus"),
           h("button.btn", { onclick: () => app.go("setup") }, icon("shield"), "Guía de configuración"),
@@ -647,6 +653,7 @@ export function createHistory(app) {
     fresh.add(f.id);
     if (!dirty && sort.key === "seq" && sort.dir === 1) {
       if (passes(f)) view.push(f);
+      if (!filters.hideNoise || !isNoise(f)) visible += 1;
     } else {
       dirty = true;
     }

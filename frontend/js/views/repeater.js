@@ -46,7 +46,8 @@ export function createRepeater(app) {
       const dot = t.response?.response ? h(`span.rdot`, { style: { background: `var(--${statusVar(t.response.response.status_code)})` } }) : null;
       const btn = h(`button.rtab${t.id === currentId ? ".on" : ""}`, {
         title: `${t.tls ? "https" : "http"}://${t.host}:${t.port}`,
-        onclick: () => select(t.id),
+        // sin re-render si ya está activa: un doble clic necesita que el botón siga en el DOM
+        onclick: () => { if (t.id !== currentId) select(t.id); },
         onauxclick: (e) => { if (e.button === 1) closeTab(t.id); },
         ondblclick: () => rename(t.id),
         oncontextmenu: (e) => { e.preventDefault(); tabMenu(e.clientX, e.clientY, t); },
@@ -263,9 +264,11 @@ export function createRepeater(app) {
   function rename(id) {
     const t = tabs.find((x) => x.id === id);
     const btn = [...strip.children][tabs.indexOf(t)];
-    if (!t || !btn) return;
-    const input = h("input.input", { value: t.name });
-    btn.replaceChildren(input);
+    if (!t || !btn || btn.tagName !== "BUTTON") return;
+    // El input reemplaza al botón (no va adentro): un <button> ancestro convierte
+    // Espacio en un click que re-renderiza la tira y corta la edición a medias.
+    const input = h("input.input.rtab-edit", { value: t.name, maxlength: 80, spellcheck: false });
+    btn.replaceWith(input);
     input.focus();
     input.select();
     let finished = false;
@@ -274,19 +277,25 @@ export function createRepeater(app) {
       if (finished) return;
       finished = true;
       const name = input.value.trim();
-      if (commit && name && name !== t.name) {
+      const prev = t.name;
+      if (commit && name && name !== prev) {
         t.name = name;
-        try { await app.api.patch(`/api/repeater/tabs/${id}`, { name }); } catch (e) { toast("err", "No se pudo renombrar", e.message); }
+        renderStrip();
+        try {
+          await app.api.patch(`/api/repeater/tabs/${id}`, { name });
+        } catch (e) {
+          t.name = prev;
+          toast("err", "No se pudo renombrar", e.message);
+        }
       }
       renderStrip();
     };
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") done(true);
       if (e.key === "Escape") done(false);
-      e.stopPropagation();
+      e.stopPropagation(); // que Ctrl+W, Supr, etc. no actúen sobre la vista
     });
     input.addEventListener("blur", () => done(true));
-    input.addEventListener("click", (e) => e.stopPropagation());
   }
 
   function tabMenu(x, y, t) {
@@ -294,7 +303,7 @@ export function createRepeater(app) {
       { label: "Renombrar", icon: "edit", onClick: () => rename(t.id) },
       { label: "Duplicar", icon: "copy", onClick: () => {
         if (t.id === currentId) readForm(t);
-        createTab({ host: t.host, port: t.port, tls: t.tls, message: t.message, name: `${t.name} (copia)` });
+        createTab({ host: t.host, port: t.port, tls: t.tls, message: t.message, name: `${t.name.slice(0, 72)} (copia)` });
       } },
       "sep",
       { label: "Cerrar", icon: "x", onClick: () => closeTab(t.id) },
