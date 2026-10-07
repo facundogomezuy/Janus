@@ -14,10 +14,19 @@ export function createRepeater(app) {
   // --- pestañas ------------------------------------------------------------------------------
   // Dónde empezó la secuencia de clics: si el 1.º cierra una pestaña, la tira se
   // corre y el 2.º de ese doble clic cae sobre otra (o sobre "+"); ahí no actúa.
+  // Si la tira no se movió (el puntero pasó a otro control), es un clic normal.
   let pressedOn = null;
-  document.addEventListener("mousedown", (e) => { if (e.detail <= 1) pressedOn = null; }, true);
+  let pressAt = null;
+  document.addEventListener("mousedown", (e) => {
+    if (e.detail <= 1) { pressedOn = null; pressAt = [e.clientX, e.clientY]; }
+  }, true);
   const press = (key) => (e) => { if (e.detail <= 1) pressedOn = key; };
-  const sameTarget = (e, key) => e.detail <= 1 || pressedOn === key;
+  const keyAt = ([x, y]) => {
+    const el = document.elementFromPoint(x, y);
+    return el?.closest(".rtab")?.dataset.id ?? (el?.closest(".rtab-add") ? "+" : null);
+  };
+  const shifted = () => pressedOn !== null && keyAt(pressAt) !== pressedOn;
+  const sameTarget = (e, key) => e.detail <= 1 || pressedOn === key || !shifted();
   const strip = h("div.rtabs");
   const addBtn = h("button.icon-btn.rtab-add", {
     title: "Nueva pestaña (Ctrl+T)",
@@ -52,14 +61,16 @@ export function createRepeater(app) {
   const cur = () => tabs.find((t) => t.id === currentId);
 
   function tabButton(t) {
+    const key = String(t.id); // como en dataset.id
     const dot = t.response?.response ? h(`span.rdot`, { style: { background: `var(--${statusVar(t.response.response.status_code)})` } }) : null;
     return h(`button.rtab${t.id === currentId ? ".on" : ""}`, {
+      dataset: { id: key },
       title: `${t.name}\n${t.tls ? "https" : "http"}://${t.host}:${t.port}`,
+      onmousedown: press(key),
       // sin re-render si ya está activa: un doble clic necesita que el botón siga en el DOM
-      onmousedown: press(t.id),
-      onclick: (e) => { if (sameTarget(e, t.id) && t.id !== currentId) select(t.id); },
+      onclick: (e) => { if (sameTarget(e, key) && t.id !== currentId) select(t.id); },
       onauxclick: (e) => { if (e.button === 1) closeTab(t.id); },
-      ondblclick: (e) => { if (sameTarget(e, t.id)) rename(t.id); },
+      ondblclick: () => { if (pressedOn === key) rename(t.id); }, // solo un doble clic sobre esta
       oncontextmenu: (e) => { e.preventDefault(); tabMenu(e.clientX, e.clientY, t); },
     }, dot, h("span.rn", t.name), h("span.rx", {
       title: "Cerrar",
