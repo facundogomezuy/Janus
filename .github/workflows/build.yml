@@ -89,7 +89,7 @@ jobs:
       - name: Build de la app (Tauri)
         run: npx tauri build --bundles ${{ matrix.bundles }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: janus-${{ runner.os }}
           path: |
