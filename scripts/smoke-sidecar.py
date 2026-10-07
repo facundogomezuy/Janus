@@ -13,6 +13,7 @@ import contextlib
 import http.client
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -46,12 +47,37 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
+def host_triple() -> str | None:
+    """Mismo criterio que scripts/build-backend.mjs: $TAURI_TARGET_TRIPLE o el host de rustc."""
+    if os.environ.get("TAURI_TARGET_TRIPLE"):
+        return os.environ["TAURI_TARGET_TRIPLE"]
+    try:
+        out = subprocess.run(["rustc", "-vV"], capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    m = re.search(r"^host: (\S+)$", out, re.M)
+    return m.group(1) if m else None
+
+
+def find_sidecar() -> Path | None:
+    """El binario de esta plataforma, no el primero que aparezca (WSL + Windows, otra arquitectura)."""
+    bins = ROOT / "src-tauri" / "binaries"
+    ext = ".exe" if sys.platform == "win32" else ""
+    triple = host_triple()
+    if triple:
+        exe = bins / f"janus-backend-{triple}{ext}"
+        return exe if exe.is_file() else None
+    found = [p for p in bins.glob("janus-backend-*") if p.suffix == ext]
+    return found[0] if len(found) == 1 else None
+
+
 def main() -> int:
-    found = sorted((ROOT / "src-tauri" / "binaries").glob("janus-backend-*"))
-    if not found:
-        print("no hay sidecar en src-tauri/binaries (correr npm run backend:build)")
+    exe = find_sidecar()
+    if exe is None:
+        have = ", ".join(p.name for p in (ROOT / "src-tauri" / "binaries").glob("janus-backend-*")) or "ninguno"
+        print(f"no hay sidecar para esta plataforma en src-tauri/binaries (hay: {have}); correr npm run backend:build")
         return 1
-    exe = found[0]
+    print(f"probando {exe.name}")
     target = ThreadingHTTPServer(("127.0.0.1", 0), Target)
     threading.Thread(target=target.serve_forever, daemon=True).start()
     proxy_port = free_port()
