@@ -269,8 +269,11 @@ fn stop_backend(app: &AppHandle) {
     if exited(STOP_TIMEOUT) {
         return;
     }
-    kill_engine(child.pid(), engine_pid, source_python().is_none());
-    if !exited(KILL_TIMEOUT) {
+    let frozen = source_python().is_none();
+    kill_engine(child.pid(), engine_pid, frozen);
+    // Congelado se espera a que el cargador limpie y salga solo; desde el código
+    // no hay cargador, y `child` puede ser el motor mismo (si no llegó a dar su PID).
+    if !frozen || !exited(KILL_TIMEOUT) {
         let _ = child.kill();
     }
 }
