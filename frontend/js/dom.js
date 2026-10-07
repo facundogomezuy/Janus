@@ -317,7 +317,10 @@ export function modal({ title, body, actions = [], size = "", onClose } = {}) {
   backdrop.addEventListener("mousedown", (e) => { if (e.target === backdrop) close(); });
   backdrop.append(box);
   document.body.append(backdrop);
-  setTimeout(() => box.querySelector("input,textarea,select,button.primary")?.focus(), 30);
+  // Foco inmediato (lo que se escriba enseguida no se pierde); el respaldo cubre a quien lo robe.
+  const focusFirst = () => box.querySelector("input,textarea,select,button.primary")?.focus();
+  focusFirst();
+  setTimeout(() => { if (!box.contains(document.activeElement)) focusFirst(); }, 30);
   return { close, box };
 }
 
@@ -336,11 +339,11 @@ export function confirmDialog({ title, message, confirmLabel = "Confirmar", dang
   });
 }
 
-export function promptDialog({ title, label, value = "", placeholder = "", multiline = false }) {
+export function promptDialog({ title, label, value = "", placeholder = "", multiline = false, maxlength = null }) {
   return new Promise((resolve) => {
     const input = multiline
-      ? h("textarea.input", { rows: 4, style: { width: "100%", height: "96px", padding: "8px 10px", resize: "vertical" } })
-      : h("input.input", { style: { width: "100%" }, placeholder });
+      ? h("textarea.input", { rows: 4, maxlength, style: { width: "100%", height: "96px", padding: "8px 10px", resize: "vertical" } })
+      : h("input.input", { style: { width: "100%" }, placeholder, maxlength, spellcheck: false });
     input.value = value;
     let result = null;
     const m = modal({
@@ -353,6 +356,9 @@ export function promptDialog({ title, label, value = "", placeholder = "", multi
       ],
       onClose: () => resolve(result),
     });
+    // Una línea: escribir reemplaza (como al renombrar); multilínea: se sigue escribiendo al final.
+    if (multiline) input.setSelectionRange(input.value.length, input.value.length);
+    else input.select();
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && (!multiline || e.ctrlKey)) {
         result = input.value;

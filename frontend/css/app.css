@@ -648,17 +648,18 @@ button.sb-item:hover { background: var(--hover); color: var(--text); }
 
 /* --- repeater ---------------------------------------------------------------------------------------- */
 .rtabs { flex: none; display: flex; align-items: flex-end; gap: 2px; height: 38px; padding: 0 8px; background: var(--surface-0); border-bottom: 1px solid var(--border); overflow-x: auto; overflow-y: hidden; }
-.rtab { height: 30px; display: inline-flex; align-items: center; gap: 7px; padding: 0 6px 0 12px; max-width: 220px;
+.rtab { height: 30px; display: inline-flex; align-items: center; gap: 7px; padding: 0 6px 0 12px; min-width: 76px; max-width: 220px;
   border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0; background: none; color: var(--text-2);
   font-size: 12px; position: relative; top: 1px; white-space: nowrap; }
 .rtab:hover { color: var(--text); background: var(--hover); }
 .rtab.on { background: var(--surface-1); border-color: var(--border); color: var(--text); }
-.rtab .rn { overflow: hidden; text-overflow: ellipsis; }
+.rtab .rn { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; }
 .rtab .rx { width: 18px; height: 18px; border-radius: 4px; display: grid; place-items: center; color: var(--text-3); opacity: 0; transition: opacity var(--t-fast); }
 .rtab:hover .rx, .rtab.on .rx { opacity: 1; }
+/* invisible = no clicable: un clic en una pestaña de nombre corto no debe cerrarla por accidente */
+.rtab:not(:hover):not(.on) .rx { pointer-events: none; }
 .rtab .rx:hover { background: var(--surface-3); color: var(--text); }
 .rtab .rdot { width: 6px; height: 6px; border-radius: 50%; }
-.rtabs > .rtab-edit { width: 150px; height: 28px; flex: none; margin-bottom: 1px; font-size: 12px; padding: 0 10px; }
 .rtab-add { height: 28px; width: 28px; margin-bottom: 2px; }
 .target-bar { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--surface-1); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .target-bar .host { flex: 1; min-width: 160px; max-width: 420px; }
