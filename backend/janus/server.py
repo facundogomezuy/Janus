@@ -137,6 +137,10 @@ def _parse_url(raw: str, *, error: str) -> tuple[str, SplitResult, int]:
     sin esquema, no una URL rara.
     """
     url = raw.strip()
+    # urlsplit descarta \t\r\n en silencio (se validaría otra URL que la que se
+    # lanza) y un NUL rompe Popen: los caracteres de control no van
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in url):
+        raise HTTPException(status_code=400, detail=error)
     if not _SCHEME_RE.match(url):
         url = "https://" + url
     try:
@@ -161,10 +165,14 @@ def _browser_url(raw: str | None) -> str | None:
 def _open_path(path: Path) -> None:
     if sys.platform == "win32":
         os.startfile(path)  # noqa: S606 - abre el Explorador en esa carpeta
-    elif sys.platform == "darwin":
-        subprocess.Popen(["open", str(path)])  # noqa: S603, S607
-    else:
-        subprocess.Popen(["xdg-open", str(path)])  # noqa: S603, S607
+        return
+    # Sin heredar los pipes del sidecar: un gestor de archivos que quede vivo
+    # los mantendría abiertos y Tauri no vería terminar al motor.
+    opener = "open" if sys.platform == "darwin" else "xdg-open"
+    subprocess.Popen(  # noqa: S603, S607
+        [opener, str(path)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, start_new_session=True,
+    )
 
 
 # --- app ------------------------------------------------------------------------

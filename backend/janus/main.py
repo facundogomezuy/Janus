@@ -3,8 +3,9 @@
 Arranque:
   1. Abre la base, levanta el motor mitmproxy y la API (FastAPI/uvicorn) en el
      mismo event loop. La API escucha solo en 127.0.0.1, en un puerto libre.
-  2. Cuando ambos están listos imprime UNA línea por stdout que Tauri parsea:
+  2. Cuando ambos están listos imprime por stdout la línea que Tauri parsea:
          JANUS_READY {"port": <int>, "token": "<str>", ...}
+     (con --sidecar, antes va "JANUS_PID <pid>" para poder cortar un arranque lento)
   3. Con ``--sidecar`` (lo pasa Tauri) vigila stdin: cuando Tauri se cierra
      —o muere— el pipe da EOF y el backend se apaga ordenadamente (restaura el
      proxy del sistema, libera flows retenidos). Así nunca queda huérfano.
@@ -226,6 +227,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.data_dir:
         os.environ["JANUS_DATA_DIR"] = args.data_dir
     _fix_stdio()
+    if args.sidecar and sys.stdout is not None:
+        # Antes de lo pesado (mitmproxy): si Tauri tiene que cortar un arranque
+        # lento, mata a este proceso y no al cargador de PyInstaller, que así
+        # puede borrar su carpeta temporal (_MEI).
+        print(f"JANUS_PID {os.getpid()}", flush=True)
     _setup_logging(args.verbose)
     log.info("Janus %s (Python %s, %s)", __version__, sys.version.split()[0], sys.platform)
     try:
