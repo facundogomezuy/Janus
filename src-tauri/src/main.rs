@@ -62,6 +62,8 @@ struct Inner {
     child: Option<CommandChild>,
     exit: Option<Arc<Exit>>,
     ready: Option<Handshake>,
+    /// PID del intérprete ("JANUS_PID" al arrancar o el del handshake).
+    engine_pid: Option<u32>,
     error: Option<String>,
     logs: VecDeque<String>,
     generation: u64,
@@ -172,6 +174,7 @@ fn spawn_backend(app: &AppHandle) -> Result<(), String> {
         inner.child = Some(child);
         inner.exit = Some(exit.clone());
         inner.ready = None;
+        inner.engine_pid = None;
         inner.error = None;
         inner.logs.clear();
         inner.generation
@@ -190,9 +193,16 @@ fn spawn_backend(app: &AppHandle) -> Result<(), String> {
                     if let Some(payload) = text.strip_prefix("JANUS_READY ") {
                         if current {
                             match serde_json::from_str::<Handshake>(payload) {
-                                Ok(hs) => inner.ready = Some(hs),
+                                Ok(hs) => {
+                                    inner.engine_pid = inner.engine_pid.or(hs.pid);
+                                    inner.ready = Some(hs);
+                                }
                                 Err(e) => inner.error = Some(format!("handshake inválido del motor: {e}")),
                             }
+                        }
+                    } else if let Some(pid) = text.strip_prefix("JANUS_PID ") {
+                        if current {
+                            inner.engine_pid = pid.trim().parse().ok();
                         }
                     } else if current {
                         push_log(&mut inner, text);
@@ -236,15 +246,15 @@ fn spawn_backend(app: &AppHandle) -> Result<(), String> {
 /// El sidecar es un onefile de PyInstaller: `child` es el cargador, que lanza
 /// el intérprete como hijo y borra %TEMP%\_MEIxxxx cuando ese hijo termina.
 /// `child.kill()` solo mata al cargador y el motor quedaría huérfano con los
-/// puertos tomados. Si no contesta, se mata primero al intérprete (su PID llega
-/// en el handshake) y se deja que el cargador limpie y salga solo.
+/// puertos tomados. Si no contesta, se mata al intérprete y se deja que el
+/// cargador limpie y salga solo; `child.kill()` queda como último recurso.
 fn stop_backend(app: &AppHandle) {
     let (child, exit, engine_pid) = {
         let backend = app.state::<Backend>();
         let mut inner = backend.0.lock().unwrap();
         inner.generation += 1; // los eventos del proceso viejo ya no tocan el estado
-        let engine_pid = inner.ready.take().and_then(|hs| hs.pid);
-        (inner.child.take(), inner.exit.take(), engine_pid)
+        inner.ready = None;
+        (inner.child.take(), inner.exit.take(), inner.engine_pid.take())
     };
     let Some(mut child) = child else { return };
     let _ = child.write(b"shutdown\n");
@@ -252,19 +262,17 @@ fn stop_backend(app: &AppHandle) {
     if exited(STOP_TIMEOUT) {
         return;
     }
-    match engine_pid {
-        Some(pid) => kill_process(pid, false),
-        // todavía arrancando: no sabemos el PID del intérprete, se baja el árbol entero
-        None => kill_process(child.pid(), true),
-    }
+    kill_engine(child.pid(), engine_pid);
     if !exited(KILL_TIMEOUT) {
         let _ = child.kill();
     }
 }
 
-/// Termina un proceso (y, con `tree`, sus hijos) sin abrir ventanas de consola.
-fn kill_process(pid: u32, tree: bool) {
-    let pid = pid.to_string();
+/// Mata al intérprete del motor sin tocar al cargador, y sin abrir consolas.
+/// A prueba de PID reusados: en Unix se apunta a los hijos del cargador
+/// (`pkill -P`); en Windows el PID del intérprete no se reusa mientras el
+/// cargador, que sigue vivo, tenga abierto el handle de su hijo.
+fn kill_engine(loader: u32, engine: Option<u32>) {
     #[cfg(windows)]
     let mut cmd = {
         use std::os::windows::process::CommandExt;
@@ -273,23 +281,19 @@ fn kill_process(pid: u32, tree: bool) {
             .map(|root| PathBuf::from(root).join("System32").join("taskkill.exe"))
             .unwrap_or_else(|| PathBuf::from("taskkill.exe"));
         let mut cmd = std::process::Command::new(taskkill);
-        cmd.args(["/PID", &pid, "/F"]).creation_flags(CREATE_NO_WINDOW);
-        if tree {
-            cmd.arg("/T");
-        }
+        match engine {
+            Some(pid) => cmd.args(["/F", "/PID", &pid.to_string()]),
+            // todavía descomprimiendo: no hay intérprete conocido, se baja el árbol
+            None => cmd.args(["/F", "/T", "/PID", &loader.to_string()]),
+        };
+        cmd.creation_flags(CREATE_NO_WINDOW);
         cmd
     };
     #[cfg(unix)]
     let mut cmd = {
-        if tree {
-            let _ = std::process::Command::new("pkill")
-                .args(["-KILL", "-P", &pid])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-        }
-        let mut cmd = std::process::Command::new("kill");
-        cmd.args(["-KILL", &pid]);
+        let _ = engine;
+        let mut cmd = std::process::Command::new("pkill");
+        cmd.args(["-KILL", "-P", &loader.to_string()]);
         cmd
     };
     let _ = cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();

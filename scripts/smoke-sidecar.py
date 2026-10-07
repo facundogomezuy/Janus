@@ -113,13 +113,22 @@ def main() -> int:
 
 
 def check(proc: subprocess.Popen, t0: float, proxy_port: int, target_port: int) -> None:
-    box: dict = {}
-    reader = threading.Thread(target=lambda: box.setdefault("line", proc.stdout.readline()), daemon=True)
+    box: dict = {"lines": []}
+
+    def read() -> None:  # hasta JANUS_READY; antes llega "JANUS_PID <pid>"
+        for raw in iter(proc.stdout.readline, b""):
+            line = raw.decode("utf-8", "replace").strip()
+            box["lines"].append(line)
+            if line.startswith("JANUS_READY "):
+                return
+
+    reader = threading.Thread(target=read, daemon=True)
     reader.start()
     reader.join(timeout=90)
-    line = box.get("line", b"").decode("utf-8", "replace").strip()
-    assert line.startswith("JANUS_READY "), f"sin handshake: {line!r}"
-    hs = json.loads(line.split(" ", 1)[1])
+    lines = box["lines"]
+    assert lines and lines[-1].startswith("JANUS_READY "), f"sin handshake: {lines!r}"
+    hs = json.loads(lines[-1].split(" ", 1)[1])
+    assert f"JANUS_PID {hs['pid']}" in lines, f"falta JANUS_PID antes del handshake: {lines!r}"
     print(f"handshake en {time.monotonic() - t0:.1f}s: api :{hs['port']}, proxy {hs['proxy']}")
     assert hs["proxy"]["running"], "el proxy no está escuchando"
     auth = {"Authorization": f"Bearer {hs['token']}"}
