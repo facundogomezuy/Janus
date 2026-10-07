@@ -577,6 +577,35 @@ def test_client_rejecting_ca_creates_hint_event(janus, targets):
 
 def test_browser_launch_rejects_non_http_urls(janus):
     """La URL inicial va como argumento al navegador: nunca debe poder ser un flag."""
-    for bad in ("--disable-web-security://x", "file:///etc/passwd", "javascript://alert(1)"):
+    for bad in ("--disable-web-security://x", "file:///etc/passwd", "javascript://alert(1)",
+                "http://[::1", "https://[foo]/", "http://target.com:99999/"):
         status, data = janus.api.post("/api/browsers/launch", {"url": bad})
         assert status == 400 and "http" in data["detail"], (bad, status, data)
+
+
+def test_scope_tester_accepts_urls_without_scheme(janus):
+    """Sin esquema se asume https, aunque la query traiga otra URL; las inválidas son 400, no 500."""
+    status, data = janus.api.post("/api/scope/test", {"url": "target.com/cb?redirect=https://target.com/home"})
+    assert status == 200 and data["in_scope"] is True, data
+    assert janus.api.post("/api/scope/test", {"url": "http://[::1"})[0] == 400
+
+
+def test_api_shutdown_exits_cleanly(tmp_path):
+    """/api/shutdown con el hilo de stdin vivo (modo sidecar) no debe abortar el intérprete."""
+    env = {**os.environ, "JANUS_DATA_DIR": str(tmp_path), "PYTHONUTF8": "1"}
+    env.pop("JANUS_DEV", None)
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "janus", "--sidecar", "--proxy-port", str(_free_port())],
+        cwd=BACKEND, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    try:
+        hs = json.loads(proc.stdout.readline().decode().split(" ", 1)[1])
+        status, _ = Api(hs["port"], hs["token"]).post("/api/shutdown")
+        assert status == 200
+        rc = proc.wait(timeout=20)
+        stderr = proc.stderr.read().decode(errors="replace")
+        assert rc == 0 and "Fatal Python error" not in stderr, stderr
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=10)

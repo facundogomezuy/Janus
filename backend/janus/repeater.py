@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import time
 from typing import Any
 
 from . import httpmsg
 from .rawhttp import RawResult
+
+_NUMERIC_NAME = re.compile(r"[0-9]{1,9}")
 
 TAB_COLS = "id, name, host, port, tls, raw_request, orig_body, encoding, response_meta, position, updated_at"
 
@@ -53,7 +56,8 @@ def get_tab(conn, tab_id: int) -> dict | None:
 def _next_name(conn) -> str:
     """Siguiente número libre (no se repite al cerrar pestañas del medio)."""
     names = conn.execute("SELECT name FROM repeater_tabs WHERE project_id = 1").fetchall()
-    used = [int(r["name"]) for r in names if r["name"].isdigit()]
+    # solo dígitos ASCII: isdigit() acepta "²" o "①", que int() rechaza
+    used = [int(r["name"]) for r in names if _NUMERIC_NAME.fullmatch(r["name"])]
     return str(max(used, default=0) + 1)
 
 

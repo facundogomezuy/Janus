@@ -8,11 +8,12 @@ import asyncio
 import logging
 import mimetypes
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -84,7 +85,7 @@ class FlowIds(BaseModel):
 
 class TabCreate(BaseModel):
     from_flow: str | None = None
-    name: str | None = None
+    name: str | None = Field(default=None, max_length=80)
     host: str = "example.com"
     port: int = Field(default=443, ge=1, le=65535)
     tls: bool = True
@@ -125,17 +126,36 @@ def _bad_request(exc: Exception) -> HTTPException:
     return HTTPException(status_code=400, detail=str(exc))
 
 
-def _browser_url(raw: str | None) -> str | None:
-    """URL inicial del navegador Janus: solo http(s), así nunca llega como flag."""
-    url = (raw or "").strip()
-    if not url:
-        return None
-    if "://" not in url:
+_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+
+
+def _parse_url(raw: str, *, error: str) -> tuple[str, SplitResult, int]:
+    """URL escrita a mano -> (url, partes, puerto). Sin esquema se asume https://.
+
+    Solo http(s) con host válido; cualquier otra cosa es 400, nunca 500. El
+    esquema solo cuenta al principio: "target.com/cb?r=https://x" es un host
+    sin esquema, no una URL rara.
+    """
+    url = raw.strip()
+    if not _SCHEME_RE.match(url):
         url = "https://" + url
-    parts = urlsplit(url)
-    if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
-        raise HTTPException(status_code=400, detail="la URL inicial tiene que ser http:// o https://")
-    return url
+    try:
+        parts = urlsplit(url)
+        host, port = parts.hostname, parts.port
+    except ValueError as exc:  # "[::1" sin cerrar, puerto fuera de rango...
+        raise HTTPException(status_code=400, detail=error) from exc
+    scheme = parts.scheme.lower()
+    if scheme not in ("http", "https") or not host or host.startswith("-"):
+        raise HTTPException(status_code=400, detail=error)
+    return url, parts, port or history.default_port(scheme)
+
+
+def _browser_url(raw: str | None) -> str | None:
+    """URL inicial del navegador Janus. Va como argumento al ejecutable: siempre
+    empieza con http(s)://, así nunca puede llegar como flag."""
+    if not (raw or "").strip():
+        return None
+    return _parse_url(raw, error="URL inicial inválida: tiene que ser http:// o https:// con un host")[0]
 
 
 def _open_path(path: Path) -> None:
@@ -311,18 +331,12 @@ def create_app(core: Core, *, frontend_dir: Path | None = None, on_shutdown=None
 
     @app.post("/api/scope/test", dependencies=guard)
     def test_scope(body: ScopeTest) -> dict:
-        raw = body.url.strip()
-        if "://" not in raw:
-            raw = "https://" + raw
-        parts = urlsplit(raw)
-        if not parts.hostname:
-            raise HTTPException(status_code=400, detail="URL inválida")
-        scheme = parts.scheme.lower()
-        port = parts.port or history.default_port(scheme)
+        _, parts, port = _parse_url(body.url, error="URL inválida")
+        scheme, host = parts.scheme.lower(), parts.hostname
         path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
-        ok, rule = core.scope.evaluate(scheme, parts.hostname, port, path)
+        ok, rule = core.scope.evaluate(scheme, host, port, path)
         return {"in_scope": ok, "rule": rule.to_json() if rule else None,
-                "decrypted": scheme == "http" or not core.scope.passthrough(parts.hostname, port)}
+                "decrypted": scheme == "http" or not core.scope.passthrough(host, port)}
 
     # --- repeater ---------------------------------------------------------------------
 
