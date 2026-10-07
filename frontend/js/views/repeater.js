@@ -44,7 +44,7 @@ export function createRepeater(app) {
   function tabButton(t) {
     const dot = t.response?.response ? h(`span.rdot`, { style: { background: `var(--${statusVar(t.response.response.status_code)})` } }) : null;
     return h(`button.rtab${t.id === currentId ? ".on" : ""}`, {
-      title: `${t.tls ? "https" : "http"}://${t.host}:${t.port}`,
+      title: `${t.name}\n${t.tls ? "https" : "http"}://${t.host}:${t.port}`,
       // sin re-render si ya está activa: un doble clic necesita que el botón siga en el DOM
       onclick: () => { if (t.id !== currentId) select(t.id); },
       onauxclick: (e) => { if (e.button === 1) closeTab(t.id); },
@@ -57,6 +57,7 @@ export function createRepeater(app) {
         if (e.detail > 1) return; // el 2.º clic de un doble clic nunca cierra una pestaña
         closeTab(t.id);
       },
+      ondblclick: (e) => e.stopPropagation(), // ni renombra la pestaña que quedó debajo
     }, icon("x", "sm")));
   }
 

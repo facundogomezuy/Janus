@@ -648,7 +648,7 @@ button.sb-item:hover { background: var(--hover); color: var(--text); }
 
 /* --- repeater ---------------------------------------------------------------------------------------- */
 .rtabs { flex: none; display: flex; align-items: flex-end; gap: 2px; height: 38px; padding: 0 8px; background: var(--surface-0); border-bottom: 1px solid var(--border); overflow-x: auto; overflow-y: hidden; }
-.rtab { height: 30px; display: inline-flex; align-items: center; gap: 7px; padding: 0 6px 0 12px; min-width: 76px; max-width: 220px;
+.rtab { flex: none; height: 30px; display: inline-flex; align-items: center; gap: 7px; padding: 0 6px 0 12px; min-width: 76px; max-width: 220px;
   border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0; background: none; color: var(--text-2);
   font-size: 12px; position: relative; top: 1px; white-space: nowrap; }
 .rtab:hover { color: var(--text); background: var(--hover); }
