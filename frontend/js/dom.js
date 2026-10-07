@@ -314,7 +314,9 @@ export function modal({ title, body, actions = [], size = "", onClose } = {}) {
     if (e.key === "Escape") { e.stopPropagation(); close(); }
   };
   document.addEventListener("keydown", onKey, true);
-  backdrop.addEventListener("mousedown", (e) => { if (e.target === backdrop) close(); });
+  // Solo un clic nuevo cierra: el 3.º de un triple clic (o el 2.º de un doble clic que
+  // abrió el modal) cae sobre el fondo recién puesto y no debe cerrarlo.
+  backdrop.addEventListener("mousedown", (e) => { if (e.target === backdrop && e.detail <= 1) close(); });
   backdrop.append(box);
   document.body.append(backdrop);
   // Foco inmediato (lo que se escriba enseguida no se pierde); el respaldo cubre a quien lo robe.
