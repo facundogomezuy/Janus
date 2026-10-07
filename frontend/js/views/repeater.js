@@ -12,8 +12,18 @@ export function createRepeater(app) {
   let fixCL = true;
 
   // --- pestañas ------------------------------------------------------------------------------
+  // Dónde empezó la secuencia de clics: si el 1.º cierra una pestaña, la tira se
+  // corre y el 2.º de ese doble clic cae sobre otra (o sobre "+"); ahí no actúa.
+  let pressedOn = null;
+  document.addEventListener("mousedown", (e) => { if (e.detail <= 1) pressedOn = null; }, true);
+  const press = (key) => (e) => { if (e.detail <= 1) pressedOn = key; };
+  const sameTarget = (e, key) => e.detail <= 1 || pressedOn === key;
   const strip = h("div.rtabs");
-  const addBtn = h("button.icon-btn.rtab-add", { title: "Nueva pestaña (Ctrl+T)", onclick: () => createTab() }, icon("plus"));
+  const addBtn = h("button.icon-btn.rtab-add", {
+    title: "Nueva pestaña (Ctrl+T)",
+    onmousedown: press("+"),
+    onclick: (e) => { if (sameTarget(e, "+")) createTab(); },
+  }, icon("plus"));
 
   // --- barra de destino ----------------------------------------------------------------------
   const schemeSeg = h("div.segmented",
@@ -46,9 +56,10 @@ export function createRepeater(app) {
     return h(`button.rtab${t.id === currentId ? ".on" : ""}`, {
       title: `${t.name}\n${t.tls ? "https" : "http"}://${t.host}:${t.port}`,
       // sin re-render si ya está activa: un doble clic necesita que el botón siga en el DOM
-      onclick: () => { if (t.id !== currentId) select(t.id); },
+      onmousedown: press(t.id),
+      onclick: (e) => { if (sameTarget(e, t.id) && t.id !== currentId) select(t.id); },
       onauxclick: (e) => { if (e.button === 1) closeTab(t.id); },
-      ondblclick: () => rename(t.id),
+      ondblclick: (e) => { if (sameTarget(e, t.id)) rename(t.id); },
       oncontextmenu: (e) => { e.preventDefault(); tabMenu(e.clientX, e.clientY, t); },
     }, dot, h("span.rn", t.name), h("span.rx", {
       title: "Cerrar",
@@ -57,7 +68,6 @@ export function createRepeater(app) {
         if (e.detail > 1) return; // el 2.º clic de un doble clic nunca cierra una pestaña
         closeTab(t.id);
       },
-      ondblclick: (e) => e.stopPropagation(), // ni renombra la pestaña que quedó debajo
     }, icon("x", "sm")));
   }
 
