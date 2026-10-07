@@ -139,11 +139,18 @@ fn open_folder(dir: &PathBuf) -> Result<(), String> {
     std::process::Command::new(program).arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// En desarrollo se puede correr el backend desde el código, sin congelar:
+///   JANUS_BACKEND_PYTHON=backend/.venv/Scripts/python.exe npm run dev
+fn source_python() -> Option<String> {
+    if cfg!(debug_assertions) {
+        std::env::var("JANUS_BACKEND_PYTHON").ok()
+    } else {
+        None
+    }
+}
+
 fn backend_command(app: &AppHandle) -> Result<Command, String> {
-    // En desarrollo se puede correr el backend desde el código:
-    //   JANUS_BACKEND_PYTHON=backend/.venv/Scripts/python.exe npm run dev
-    #[cfg(debug_assertions)]
-    if let Ok(python) = std::env::var("JANUS_BACKEND_PYTHON") {
+    if let Some(python) = source_python() {
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../backend");
         return Ok(app.shell().command(python).args(["-m", "janus", "--sidecar"]).current_dir(dir));
     }
@@ -262,17 +269,26 @@ fn stop_backend(app: &AppHandle) {
     if exited(STOP_TIMEOUT) {
         return;
     }
-    kill_engine(child.pid(), engine_pid);
-    if !exited(KILL_TIMEOUT) {
+    let frozen = source_python().is_none();
+    kill_engine(child.pid(), engine_pid, frozen);
+    // Congelado se espera a que el cargador limpie y salga solo; desde el código
+    // no hay cargador, y `child` puede ser el motor mismo (si no llegó a dar su PID).
+    if !frozen || !exited(KILL_TIMEOUT) {
         let _ = child.kill();
     }
 }
 
-/// Mata al intérprete del motor sin tocar al cargador, y sin abrir consolas.
-/// A prueba de PID reusados: en Unix se apunta a los hijos del cargador
-/// (`pkill -P`); en Windows el PID del intérprete no se reusa mientras el
-/// cargador, que sigue vivo, tenga abierto el handle de su hijo.
-fn kill_engine(loader: u32, engine: Option<u32>) {
+/// Mata al intérprete del motor sin abrir consolas.
+///
+/// Con el sidecar congelado (`frozen`), sin tocar al cargador y nunca a un PID
+/// reusado por otro programa: en Unix se apunta a los hijos del cargador
+/// (`pkill -P`); en Windows se filtra por PID *y* por nombre de imagen, porque
+/// el cargador cierra el handle del intérprete cuando este sale y, mientras
+/// limpia %TEMP%, ese PID puede volver a asignarse.
+///
+/// Desde el código (solo desarrollo) `child` puede ser el intérprete, un
+/// lanzador (venv de Windows) o un wrapper (`uv run`): se mata el PID del motor.
+fn kill_engine(loader: u32, engine: Option<u32>, frozen: bool) {
     #[cfg(windows)]
     let mut cmd = {
         use std::os::windows::process::CommandExt;
@@ -282,19 +298,26 @@ fn kill_engine(loader: u32, engine: Option<u32>) {
             .unwrap_or_else(|| PathBuf::from("taskkill.exe"));
         let mut cmd = std::process::Command::new(taskkill);
         match engine {
+            Some(pid) if frozen => cmd.args(["/F", "/FI", &format!("PID eq {pid}"), "/FI", "IMAGENAME eq janus-backend.exe"]),
             Some(pid) => cmd.args(["/F", "/PID", &pid.to_string()]),
-            // todavía descomprimiendo: no hay intérprete conocido, se baja el árbol
+            // todavía arrancando: no hay intérprete conocido, se baja el árbol
             None => cmd.args(["/F", "/T", "/PID", &loader.to_string()]),
         };
         cmd.creation_flags(CREATE_NO_WINDOW);
         cmd
     };
     #[cfg(unix)]
-    let mut cmd = {
-        let _ = engine;
-        let mut cmd = std::process::Command::new("pkill");
-        cmd.args(["-KILL", "-P", &loader.to_string()]);
-        cmd
+    let mut cmd = match engine {
+        Some(pid) if !frozen => {
+            let mut cmd = std::process::Command::new("kill");
+            cmd.args(["-KILL", &pid.to_string()]);
+            cmd
+        }
+        _ => {
+            let mut cmd = std::process::Command::new("pkill");
+            cmd.args(["-KILL", "-P", &loader.to_string()]);
+            cmd
+        }
     };
     let _ = cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
 }

@@ -1,6 +1,6 @@
 // Vista Repeater: pestañas persistidas, envío crudo y visor de la respuesta.
 
-import { debounce, emptyState, fmtBytes, fmtMs, h, icon, openMenu, split, statusClass, toast } from "../dom.js";
+import { debounce, emptyState, fmtBytes, fmtMs, h, icon, openMenu, promptDialog, split, statusClass, toast } from "../dom.js";
 import { HttpEditor } from "../editor.js";
 import { b64ToBytes, headerFromText } from "../http.js";
 import { MessageViewer } from "../viewer.js";
@@ -12,8 +12,27 @@ export function createRepeater(app) {
   let fixCL = true;
 
   // --- pestañas ------------------------------------------------------------------------------
+  // Dónde empezó la secuencia de clics: si el 1.º cierra una pestaña, la tira se
+  // corre y el 2.º de ese doble clic cae sobre otra (o sobre "+"); ahí no actúa.
+  // Si la tira no se movió (el puntero pasó a otro control), es un clic normal.
+  let pressedOn = null;
+  let pressAt = null;
+  document.addEventListener("mousedown", (e) => {
+    if (e.detail <= 1) { pressedOn = null; pressAt = [e.clientX, e.clientY]; }
+  }, true);
+  const press = (key) => (e) => { if (e.detail <= 1) pressedOn = key; };
+  const keyAt = ([x, y]) => {
+    const el = document.elementFromPoint(x, y);
+    return el?.closest(".rtab")?.dataset.id ?? (el?.closest(".rtab-add") ? "+" : null);
+  };
+  const shifted = () => pressedOn !== null && keyAt(pressAt) !== pressedOn;
+  const sameTarget = (e, key) => e.detail <= 1 || pressedOn === key || !shifted();
   const strip = h("div.rtabs");
-  const addBtn = h("button.icon-btn.rtab-add", { title: "Nueva pestaña (Ctrl+T)", onclick: () => createTab() }, icon("plus"));
+  const addBtn = h("button.icon-btn.rtab-add", {
+    title: "Nueva pestaña (Ctrl+T)",
+    onmousedown: press("+"),
+    onclick: (e) => { if (sameTarget(e, "+")) createTab(); },
+  }, icon("plus"));
 
   // --- barra de destino ----------------------------------------------------------------------
   const schemeSeg = h("div.segmented",
@@ -41,27 +60,29 @@ export function createRepeater(app) {
 
   const cur = () => tabs.find((t) => t.id === currentId);
 
-  let renaming = null; // renombrado en curso: { finish(commit, opts) }
-  let pointerHeld = false; // hay un clic en curso (para el blur del renombrado)
-  document.addEventListener("pointerdown", () => { pointerHeld = true; }, true);
-  document.addEventListener("pointerup", () => { pointerHeld = false; }, true);
-
   function tabButton(t) {
+    const key = String(t.id); // como en dataset.id
     const dot = t.response?.response ? h(`span.rdot`, { style: { background: `var(--${statusVar(t.response.response.status_code)})` } }) : null;
     return h(`button.rtab${t.id === currentId ? ".on" : ""}`, {
-      title: `${t.tls ? "https" : "http"}://${t.host}:${t.port}`,
+      dataset: { id: key },
+      title: `${t.name}\n${t.tls ? "https" : "http"}://${t.host}:${t.port}`,
+      onmousedown: press(key),
       // sin re-render si ya está activa: un doble clic necesita que el botón siga en el DOM
-      onclick: () => { if (t.id !== currentId) select(t.id); },
+      onclick: (e) => { if (sameTarget(e, key) && t.id !== currentId) select(t.id); },
       onauxclick: (e) => { if (e.button === 1) closeTab(t.id); },
-      ondblclick: () => rename(t.id),
+      ondblclick: () => { if (pressedOn === key) rename(t.id); }, // solo un doble clic sobre esta
       oncontextmenu: (e) => { e.preventDefault(); tabMenu(e.clientX, e.clientY, t); },
-    }, dot, h("span.rn", t.name), h("span.rx", { title: "Cerrar", onclick: (e) => { e.stopPropagation(); closeTab(t.id); } }, icon("x", "sm")));
+    }, dot, h("span.rn", t.name), h("span.rx", {
+      title: "Cerrar",
+      onclick: (e) => {
+        e.stopPropagation();
+        if (e.detail > 1) return; // el 2.º clic de un doble clic nunca cierra una pestaña
+        closeTab(t.id);
+      },
+    }, icon("x", "sm")));
   }
 
   function renderStrip() {
-    // Un renombrado en curso se cierra antes: sacar su input dispara blur, y un
-    // re-render desde ahí, en medio de este replaceChildren, rompe la tira.
-    renaming?.finish(true, { render: false });
     strip.replaceChildren(...tabs.map(tabButton), addBtn);
   }
 
@@ -269,54 +290,26 @@ export function createRepeater(app) {
     try { await app.api.del(`/api/repeater/tabs/${id}`); } catch { /* ya no existe */ }
   }
 
-  function rename(id) {
-    renaming?.finish(true);
+  // Con un diálogo y no inline: editar dentro de la tira la reacomoda mientras
+  // se escribe (foco, blur, clics que caen sobre otra pestaña, re-renders de un
+  // envío que termina). El modal la deja quieta y no lo afecta nada de eso.
+  async function rename(id) {
     const t = tabs.find((x) => x.id === id);
-    const btn = [...strip.children][tabs.indexOf(t)];
-    if (!t || !btn || btn.tagName !== "BUTTON") return;
-    // El input reemplaza al botón (no va adentro): un <button> ancestro convierte
-    // Espacio en un click que re-renderiza la tira y corta la edición a medias.
-    const input = h("input.input.rtab-edit", { value: t.name, maxlength: 80, spellcheck: false });
-    const onBlur = () => {
-      if (!pointerHeld) return handle.finish(true);
-      // El blur vino de un clic (en otra pestaña, en "+"…): terminar recién cuando
-      // ese clic se complete. Si la tira cambia de ancho antes, el destino se corre
-      // bajo el puntero y el click no llega.
-      const finishSoon = () => setTimeout(() => handle.finish(true));
-      document.addEventListener("pointerup", finishSoon, { once: true, capture: true });
-      setTimeout(() => handle.finish(true), 1500); // por si el pointerup nunca llega
-    };
-    const handle = {
-      finish(commit, { render = true } = {}) {
-        if (renaming !== handle) return; // ya terminó (Enter + blur, etc.)
-        renaming = null;
-        input.removeEventListener("blur", onBlur);
-        const name = input.value.trim();
-        const prev = t.name;
-        const changed = commit && name && name !== prev;
-        if (changed) t.name = name;
-        // Solo el input vuelve a ser botón: los hermanos siguen en el DOM y un
-        // clic en otra pestaña (que es lo que causó el blur) llega igual.
-        if (render && input.isConnected) input.replaceWith(tabButton(t));
-        if (changed) {
-          app.api.patch(`/api/repeater/tabs/${id}`, { name }).catch((e) => {
-            t.name = prev;
-            toast("err", "No se pudo renombrar", e.message);
-            renderStrip();
-          });
-        }
-      },
-    };
-    renaming = handle;
-    btn.replaceWith(input);
-    input.focus();
-    input.select();
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") handle.finish(true);
-      else if (e.key === "Escape") handle.finish(false);
-      e.stopPropagation(); // que Ctrl+W, Supr, etc. no actúen sobre la vista
-    });
-    input.addEventListener("blur", onBlur);
+    if (!t) return;
+    const value = await promptDialog({ title: "Renombrar pestaña", value: t.name, maxlength: 80 });
+    const name = value?.trim();
+    const tab = tabs.find((x) => x.id === id); // un resync pudo reemplazarla (o cerrarla) mientras tanto
+    if (!tab || !name || name === tab.name) return;
+    const prev = tab.name;
+    tab.name = name;
+    renderStrip();
+    try {
+      await app.api.patch(`/api/repeater/tabs/${id}`, { name });
+    } catch (e) {
+      tab.name = prev;
+      renderStrip();
+      toast("err", "No se pudo renombrar", e.message);
+    }
   }
 
   function tabMenu(x, y, t) {
