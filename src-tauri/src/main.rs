@@ -262,16 +262,21 @@ fn stop_backend(app: &AppHandle) {
     if exited(STOP_TIMEOUT) {
         return;
     }
-    kill_engine(child.pid(), engine_pid);
-    if !exited(KILL_TIMEOUT) {
-        let _ = child.kill();
+    // en modo desarrollo no hay cargador: `child` es el intérprete mismo
+    if engine_pid != Some(child.pid()) {
+        kill_engine(child.pid(), engine_pid);
+        if exited(KILL_TIMEOUT) {
+            return;
+        }
     }
+    let _ = child.kill();
 }
 
 /// Mata al intérprete del motor sin tocar al cargador, y sin abrir consolas.
-/// A prueba de PID reusados: en Unix se apunta a los hijos del cargador
-/// (`pkill -P`); en Windows el PID del intérprete no se reusa mientras el
-/// cargador, que sigue vivo, tenga abierto el handle de su hijo.
+/// Nunca a un PID reusado por otro programa: en Unix se apunta a los hijos del
+/// cargador (`pkill -P`); en Windows se filtra por PID *y* por nombre de imagen,
+/// porque el cargador cierra el handle del intérprete cuando este sale y,
+/// mientras limpia %TEMP%, ese PID puede volver a asignarse.
 fn kill_engine(loader: u32, engine: Option<u32>) {
     #[cfg(windows)]
     let mut cmd = {
@@ -282,7 +287,7 @@ fn kill_engine(loader: u32, engine: Option<u32>) {
             .unwrap_or_else(|| PathBuf::from("taskkill.exe"));
         let mut cmd = std::process::Command::new(taskkill);
         match engine {
-            Some(pid) => cmd.args(["/F", "/PID", &pid.to_string()]),
+            Some(pid) => cmd.args(["/F", "/FI", &format!("PID eq {pid}"), "/FI", "IMAGENAME eq janus-backend.exe"]),
             // todavía descomprimiendo: no hay intérprete conocido, se baja el árbol
             None => cmd.args(["/F", "/T", "/PID", &loader.to_string()]),
         };
