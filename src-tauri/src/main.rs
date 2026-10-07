@@ -139,11 +139,18 @@ fn open_folder(dir: &PathBuf) -> Result<(), String> {
     std::process::Command::new(program).arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// En desarrollo se puede correr el backend desde el código, sin congelar:
+///   JANUS_BACKEND_PYTHON=backend/.venv/Scripts/python.exe npm run dev
+fn source_python() -> Option<String> {
+    if cfg!(debug_assertions) {
+        std::env::var("JANUS_BACKEND_PYTHON").ok()
+    } else {
+        None
+    }
+}
+
 fn backend_command(app: &AppHandle) -> Result<Command, String> {
-    // En desarrollo se puede correr el backend desde el código:
-    //   JANUS_BACKEND_PYTHON=backend/.venv/Scripts/python.exe npm run dev
-    #[cfg(debug_assertions)]
-    if let Ok(python) = std::env::var("JANUS_BACKEND_PYTHON") {
+    if let Some(python) = source_python() {
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../backend");
         return Ok(app.shell().command(python).args(["-m", "janus", "--sidecar"]).current_dir(dir));
     }
@@ -262,8 +269,9 @@ fn stop_backend(app: &AppHandle) {
     if exited(STOP_TIMEOUT) {
         return;
     }
-    // en modo desarrollo no hay cargador: `child` es el intérprete mismo
-    if engine_pid != Some(child.pid()) {
+    // Desde el código no hay cargador de PyInstaller y alcanza con child.kill():
+    // es el intérprete, o (venv de Windows) un lanzador que lo mata al cerrarse.
+    if source_python().is_none() {
         kill_engine(child.pid(), engine_pid);
         if exited(KILL_TIMEOUT) {
             return;
