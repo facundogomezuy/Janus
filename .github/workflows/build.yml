@@ -1,6 +1,7 @@
 name: build
 
-# Tests del backend en cada push/PR. Instaladores al taggear (v*) o a mano.
+# Tests del backend en cada push/PR. Instaladores al taggear (v*) o a mano;
+# al taggear, además, el release de GitHub con los instaladores.
 # Compilar por-SO es obligatorio: no se cross-compila cómodo (ARCHITECTURE.md §9).
 
 on:
@@ -97,3 +98,39 @@ jobs:
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
+
+  # Al taggear v*: release de GitHub con los instaladores y sus SHA256.
+  # Las notas salen de docs/releases/<tag>.md; si el release ya existe, se
+  # actualizan las notas y se reemplazan los archivos (re-correr es seguro).
+  release:
+    needs: bundle
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: janus-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publicar el release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          mapfile -t files < <(find dist -type f \( -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' \) | sort)
+          if [ "${#files[@]}" -eq 0 ]; then echo "no hay instaladores"; exit 1; fi
+          for f in "${files[@]}"; do (cd "$(dirname "$f")" && sha256sum "$(basename "$f")"); done > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          notes="docs/releases/${TAG}.md"
+          [ -f "$notes" ] || { echo "falta $notes"; exit 1; }
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "Janus ${TAG}" --notes-file "$notes"
+            gh release upload "$TAG" "${files[@]}" SHA256SUMS.txt --clobber
+          else
+            gh release create "$TAG" "${files[@]}" SHA256SUMS.txt --title "Janus ${TAG}" --notes-file "$notes"
+          fi
