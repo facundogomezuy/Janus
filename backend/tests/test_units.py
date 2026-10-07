@@ -170,5 +170,9 @@ def test_repeater_tab_names_do_not_repeat(tmp_path):
         assert [a["name"], b["name"], c["name"]] == ["1", "2", "3"]
         db.write_sync(repeater.delete_tab, b["id"])
         assert db.write_sync(make)["name"] == "4"
+        # nombres que isdigit() acepta pero int() no: no deben romper la numeración
+        for odd in ("²", "①", "1" * 50):
+            db.write_sync(repeater.update_tab, a["id"], {"name": odd})
+            assert db.write_sync(make)["name"].isdecimal()
     finally:
         db.close()

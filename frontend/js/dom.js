@@ -18,7 +18,12 @@ export function h(spec, attrs, ...kids) {
   }
   if (attrs) {
     for (const [k, v] of Object.entries(attrs)) {
-      if (v == null || v === false) continue;
+      if (v == null) continue;
+      if (v === false) {
+        // propiedades booleanas que el navegador trae en true (spellcheck, draggable…)
+        if (typeof el[k] === "boolean") el[k] = false;
+        continue;
+      }
       if (k === "class") v.split(/\s+/).filter(Boolean).forEach((c) => el.classList.add(c));
       else if (k === "style" && typeof v === "object") Object.assign(el.style, v);
       else if (k === "dataset") Object.assign(el.dataset, v);

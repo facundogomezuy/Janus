@@ -14,7 +14,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 HERE = Path(SPECPATH)  # noqa: F821 - lo define PyInstaller
 ROOT = HERE.parent
-VERSION = re.search(r'__version__ = "([^"]+)"', (HERE / "janus" / "__init__.py").read_text()).group(1)
+VERSION = re.search(r'__version__ = "([^"]+)"', (HERE / "janus" / "__init__.py").read_text(encoding="utf-8")).group(1)
 
 hiddenimports = []
 for pkg in ("mitmproxy.addons", "mitmproxy.proxy", "mitmproxy.net", "mitmproxy.utils", "uvicorn", "janus"):

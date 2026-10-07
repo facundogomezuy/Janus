@@ -24,7 +24,7 @@ Arquitectura y decisiones en [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
 ## Instalar (Windows)
 
-Descargá `Janus_0.1.0_x64-setup.exe` (artefacto del CI o build local, ver abajo) y ejecutalo. Se instala para tu usuario, sin permisos de administrador.
+Descargá `Janus_0.1.0_x64-setup.exe` desde [Releases](https://github.com/facundogomezuy/Janus/releases/latest) y ejecutalo. Se instala para tu usuario, sin permisos de administrador.
 
 Al abrirlo, andá a **Setup** y elegí:
 
@@ -49,6 +49,8 @@ backend\.venv\Scripts\pip install -r backend\requirements-dev.txt
 | `npm run backend:build` | Congela el backend con PyInstaller → `src-tauri/binaries/janus-backend-<triple>.exe`. |
 | `npm run dev` | App Tauri en modo desarrollo. Necesita el sidecar congelado (correr `backend:build` una vez); con `$env:JANUS_BACKEND_PYTHON="backend\.venv\Scripts\python.exe"` usa el backend desde el código. |
 | `npm run build` | Sidecar + app + instalador → `src-tauri\target\release\bundle\nsis\Janus_0.1.0_x64-setup.exe`. |
+
+**Publicar una versión:** subí la versión en `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `backend/pyproject.toml` y `backend/janus/__init__.py`, escribí las notas en `docs/releases/vX.Y.Z.md` y pusheá el tag `vX.Y.Z`. El CI corre los tests, arma los instaladores y crea el release de GitHub con el `.exe`, el `.deb`, el `.AppImage` y `SHA256SUMS.txt`.
 | `backend\.venv\Scripts\python -m pytest backend\tests` | Tests (unitarios + end-to-end con proxy real). |
 | `backend\.venv\Scripts\python scripts\smoke-sidecar.py` | Prueba el motor congelado como lo lanza Tauri (pipes, handshake, proxy y apagado). Correrlo después de `backend:build`. |
 

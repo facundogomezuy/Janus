@@ -3,8 +3,9 @@
 Arranque:
   1. Abre la base, levanta el motor mitmproxy y la API (FastAPI/uvicorn) en el
      mismo event loop. La API escucha solo en 127.0.0.1, en un puerto libre.
-  2. Cuando ambos están listos imprime UNA línea por stdout que Tauri parsea:
+  2. Cuando ambos están listos imprime por stdout la línea que Tauri parsea:
          JANUS_READY {"port": <int>, "token": "<str>", ...}
+     (con --sidecar, antes va "JANUS_PID <pid>" para poder cortar un arranque lento)
   3. Con ``--sidecar`` (lo pasa Tauri) vigila stdin: cuando Tauri se cierra
      —o muere— el pipe da EOF y el backend se apaga ordenadamente (restaura el
      proxy del sistema, libera flows retenidos). Así nunca queda huérfano.
@@ -84,13 +85,26 @@ class _Server(uvicorn.Server):
 
 
 def _watch_stdin(loop: asyncio.AbstractEventLoop, stop: asyncio.Event) -> None:
+    # os.read sobre el descriptor, no sys.stdin.buffer: un readline() bloqueado
+    # retiene el lock del BufferedReader y, si el apagado llega por otro lado
+    # (/api/shutdown), el intérprete aborta al cerrarlo ("could not acquire lock
+    # for <stdin> at interpreter shutdown").
     def run() -> None:
-        stream = sys.stdin.buffer if sys.stdin is not None else None
-        if stream is None:
-            return
         try:
-            for line in iter(stream.readline, b""):
-                if line.strip() == b"shutdown":
+            fd = sys.stdin.fileno() if sys.stdin is not None else None
+        except (OSError, ValueError):
+            fd = None
+        if fd is None:
+            return
+        pending = b""
+        try:
+            while True:
+                chunk = os.read(fd, 4096)
+                if not chunk:
+                    break  # EOF: Tauri cerró el pipe o murió
+                pending += chunk
+                *lines, pending = pending.split(b"\n")
+                if any(line.strip() == b"shutdown" for line in lines):
                     break
         except (OSError, ValueError):
             pass
@@ -213,6 +227,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.data_dir:
         os.environ["JANUS_DATA_DIR"] = args.data_dir
     _fix_stdio()
+    if args.sidecar and sys.stdout is not None:
+        # Antes de lo pesado (mitmproxy): si Tauri tiene que cortar un arranque
+        # lento, mata a este proceso y no al cargador de PyInstaller, que así
+        # puede borrar su carpeta temporal (_MEI).
+        print(f"JANUS_PID {os.getpid()}", flush=True)
     _setup_logging(args.verbose)
     log.info("Janus %s (Python %s, %s)", __version__, sys.version.split()[0], sys.platform)
     try:

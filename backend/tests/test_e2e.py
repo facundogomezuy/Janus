@@ -209,6 +209,24 @@ def via_proxy(proxy_port: int, method: str, host: str, port: int, path: str, *, 
     return r.status, {k.lower(): v for k, v in r.getheaders()}, data
 
 
+def _read_handshake(proc, timeout: float = 30.0) -> tuple[dict | None, list[str]]:
+    """Lee stdout hasta JANUS_READY (con --sidecar, antes llega "JANUS_PID <pid>")."""
+    box: dict = {"lines": []}
+
+    def run():
+        for raw in iter(proc.stdout.readline, b""):
+            line = raw.decode().strip()
+            box["lines"].append(line)
+            if line.startswith("JANUS_READY "):
+                box["hs"] = json.loads(line.split(" ", 1)[1])
+                return
+
+    reader = threading.Thread(target=run, daemon=True)
+    reader.start()
+    reader.join(timeout)
+    return box.get("hs"), box["lines"]
+
+
 # --- fixtures ----------------------------------------------------------------------------
 
 class Janus:
@@ -216,6 +234,7 @@ class Janus:
         self.proc, self.hs, self.proxy_port, self.data_dir = proc, handshake, proxy_port, data_dir
         self.api = Api(handshake["port"], handshake["token"])
         self.ca_pem = data_dir / "ca" / "mitmproxy-ca-cert.pem"
+        self.stdout_lines: list[str] = []
 
 
 @pytest.fixture(scope="module")
@@ -242,13 +261,10 @@ def janus(tmp_path_factory):
     )
     stderr_lines: list[bytes] = []
     threading.Thread(target=lambda: stderr_lines.extend(iter(proc.stderr.readline, b"")), daemon=True).start()
-    box: dict = {}
-    reader = threading.Thread(target=lambda: box.setdefault("line", proc.stdout.readline()), daemon=True)
-    reader.start()
-    reader.join(timeout=30)
-    line = box.get("line", b"").decode()
-    assert line.startswith("JANUS_READY "), f"sin handshake: {line!r} {b''.join(stderr_lines)!r}"
-    j = Janus(proc, json.loads(line.split(" ", 1)[1]), proxy_port, data)
+    hs, lines = _read_handshake(proc)
+    assert hs, f"sin handshake: {lines!r} {b''.join(stderr_lines)!r}"
+    j = Janus(proc, hs, proxy_port, data)
+    j.stdout_lines = lines
     yield j
     # apagado como Tauri: cerrar stdin -> EOF -> shutdown ordenado
     proc.stdin.close()
@@ -261,6 +277,8 @@ def janus(tmp_path_factory):
 # --- tests -----------------------------------------------------------------------------------
 
 def test_handshake_and_status(janus):
+    # el PID del intérprete llega antes del handshake (Tauri lo usa si tiene que cortar el arranque)
+    assert janus.stdout_lines[0] == f"JANUS_PID {janus.hs['pid']}"
     assert janus.hs["proxy"]["running"] is True
     assert janus.hs["proxy"]["listen_port"] == janus.proxy_port
     status, data = janus.api.get("/api/status")
@@ -577,6 +595,37 @@ def test_client_rejecting_ca_creates_hint_event(janus, targets):
 
 def test_browser_launch_rejects_non_http_urls(janus):
     """La URL inicial va como argumento al navegador: nunca debe poder ser un flag."""
-    for bad in ("--disable-web-security://x", "file:///etc/passwd", "javascript://alert(1)"):
+    for bad in ("--disable-web-security://x", "file:///etc/passwd", "javascript://alert(1)",
+                "http://[::1", "https://[foo]/", "http://target.com:99999/",
+                "https://x.com/\u0000", "x.com\n--flag"):
         status, data = janus.api.post("/api/browsers/launch", {"url": bad})
         assert status == 400 and "http" in data["detail"], (bad, status, data)
+
+
+def test_scope_tester_accepts_urls_without_scheme(janus):
+    """Sin esquema se asume https, aunque la query traiga otra URL; las inválidas son 400, no 500."""
+    status, data = janus.api.post("/api/scope/test", {"url": "target.com/cb?redirect=https://target.com/home"})
+    assert status == 200 and data["in_scope"] is True, data
+    assert janus.api.post("/api/scope/test", {"url": "http://[::1"})[0] == 400
+
+
+def test_api_shutdown_exits_cleanly(tmp_path):
+    """/api/shutdown con el hilo de stdin vivo (modo sidecar) no debe abortar el intérprete."""
+    env = {**os.environ, "JANUS_DATA_DIR": str(tmp_path), "PYTHONUTF8": "1"}
+    env.pop("JANUS_DEV", None)
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "janus", "--sidecar", "--proxy-port", str(_free_port())],
+        cwd=BACKEND, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    try:
+        hs, lines = _read_handshake(proc)
+        assert hs, lines
+        status, _ = Api(hs["port"], hs["token"]).post("/api/shutdown")
+        assert status == 200
+        rc = proc.wait(timeout=20)
+        stderr = proc.stderr.read().decode(errors="replace")
+        assert rc == 0 and "Fatal Python error" not in stderr, stderr
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=10)

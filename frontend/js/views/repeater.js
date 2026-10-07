@@ -41,19 +41,28 @@ export function createRepeater(app) {
 
   const cur = () => tabs.find((t) => t.id === currentId);
 
+  let renaming = null; // renombrado en curso: { finish(commit, opts) }
+  let pointerHeld = false; // hay un clic en curso (para el blur del renombrado)
+  document.addEventListener("pointerdown", () => { pointerHeld = true; }, true);
+  document.addEventListener("pointerup", () => { pointerHeld = false; }, true);
+
+  function tabButton(t) {
+    const dot = t.response?.response ? h(`span.rdot`, { style: { background: `var(--${statusVar(t.response.response.status_code)})` } }) : null;
+    return h(`button.rtab${t.id === currentId ? ".on" : ""}`, {
+      title: `${t.tls ? "https" : "http"}://${t.host}:${t.port}`,
+      // sin re-render si ya está activa: un doble clic necesita que el botón siga en el DOM
+      onclick: () => { if (t.id !== currentId) select(t.id); },
+      onauxclick: (e) => { if (e.button === 1) closeTab(t.id); },
+      ondblclick: () => rename(t.id),
+      oncontextmenu: (e) => { e.preventDefault(); tabMenu(e.clientX, e.clientY, t); },
+    }, dot, h("span.rn", t.name), h("span.rx", { title: "Cerrar", onclick: (e) => { e.stopPropagation(); closeTab(t.id); } }, icon("x", "sm")));
+  }
+
   function renderStrip() {
-    const items = tabs.map((t) => {
-      const dot = t.response?.response ? h(`span.rdot`, { style: { background: `var(--${statusVar(t.response.response.status_code)})` } }) : null;
-      const btn = h(`button.rtab${t.id === currentId ? ".on" : ""}`, {
-        title: `${t.tls ? "https" : "http"}://${t.host}:${t.port}`,
-        onclick: () => select(t.id),
-        onauxclick: (e) => { if (e.button === 1) closeTab(t.id); },
-        ondblclick: () => rename(t.id),
-        oncontextmenu: (e) => { e.preventDefault(); tabMenu(e.clientX, e.clientY, t); },
-      }, dot, h("span.rn", t.name), h("span.rx", { title: "Cerrar", onclick: (e) => { e.stopPropagation(); closeTab(t.id); } }, icon("x", "sm")));
-      return btn;
-    });
-    strip.replaceChildren(...items, addBtn);
+    // Un renombrado en curso se cierra antes: sacar su input dispara blur, y un
+    // re-render desde ahí, en medio de este replaceChildren, rompe la tira.
+    renaming?.finish(true, { render: false });
+    strip.replaceChildren(...tabs.map(tabButton), addBtn);
   }
 
   function statusVar(code) {
@@ -261,32 +270,53 @@ export function createRepeater(app) {
   }
 
   function rename(id) {
+    renaming?.finish(true);
     const t = tabs.find((x) => x.id === id);
     const btn = [...strip.children][tabs.indexOf(t)];
-    if (!t || !btn) return;
-    const input = h("input.input", { value: t.name });
-    btn.replaceChildren(input);
+    if (!t || !btn || btn.tagName !== "BUTTON") return;
+    // El input reemplaza al botón (no va adentro): un <button> ancestro convierte
+    // Espacio en un click que re-renderiza la tira y corta la edición a medias.
+    const input = h("input.input.rtab-edit", { value: t.name, maxlength: 80, spellcheck: false });
+    const onBlur = () => {
+      if (!pointerHeld) return handle.finish(true);
+      // El blur vino de un clic (en otra pestaña, en "+"…): terminar recién cuando
+      // ese clic se complete. Si la tira cambia de ancho antes, el destino se corre
+      // bajo el puntero y el click no llega.
+      const finishSoon = () => setTimeout(() => handle.finish(true));
+      document.addEventListener("pointerup", finishSoon, { once: true, capture: true });
+      setTimeout(() => handle.finish(true), 1500); // por si el pointerup nunca llega
+    };
+    const handle = {
+      finish(commit, { render = true } = {}) {
+        if (renaming !== handle) return; // ya terminó (Enter + blur, etc.)
+        renaming = null;
+        input.removeEventListener("blur", onBlur);
+        const name = input.value.trim();
+        const prev = t.name;
+        const changed = commit && name && name !== prev;
+        if (changed) t.name = name;
+        // Solo el input vuelve a ser botón: los hermanos siguen en el DOM y un
+        // clic en otra pestaña (que es lo que causó el blur) llega igual.
+        if (render && input.isConnected) input.replaceWith(tabButton(t));
+        if (changed) {
+          app.api.patch(`/api/repeater/tabs/${id}`, { name }).catch((e) => {
+            t.name = prev;
+            toast("err", "No se pudo renombrar", e.message);
+            renderStrip();
+          });
+        }
+      },
+    };
+    renaming = handle;
+    btn.replaceWith(input);
     input.focus();
     input.select();
-    let finished = false;
-    const done = async (commit) => {
-      // Enter/Escape re-renderizan la tira, lo que saca el input y dispara blur: una sola vez
-      if (finished) return;
-      finished = true;
-      const name = input.value.trim();
-      if (commit && name && name !== t.name) {
-        t.name = name;
-        try { await app.api.patch(`/api/repeater/tabs/${id}`, { name }); } catch (e) { toast("err", "No se pudo renombrar", e.message); }
-      }
-      renderStrip();
-    };
     input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") done(true);
-      if (e.key === "Escape") done(false);
-      e.stopPropagation();
+      if (e.key === "Enter") handle.finish(true);
+      else if (e.key === "Escape") handle.finish(false);
+      e.stopPropagation(); // que Ctrl+W, Supr, etc. no actúen sobre la vista
     });
-    input.addEventListener("blur", () => done(true));
-    input.addEventListener("click", (e) => e.stopPropagation());
+    input.addEventListener("blur", onBlur);
   }
 
   function tabMenu(x, y, t) {
@@ -294,7 +324,8 @@ export function createRepeater(app) {
       { label: "Renombrar", icon: "edit", onClick: () => rename(t.id) },
       { label: "Duplicar", icon: "copy", onClick: () => {
         if (t.id === currentId) readForm(t);
-        createTab({ host: t.host, port: t.port, tls: t.tls, message: t.message, name: `${t.name} (copia)` });
+        // máx. 80 caracteres; se corta por code points para no partir un emoji
+        createTab({ host: t.host, port: t.port, tls: t.tls, message: t.message, name: `${Array.from(t.name).slice(0, 72).join("")} (copia)` });
       } },
       "sep",
       { label: "Cerrar", icon: "x", onClick: () => closeTab(t.id) },
