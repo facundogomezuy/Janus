@@ -269,23 +269,23 @@ fn stop_backend(app: &AppHandle) {
     if exited(STOP_TIMEOUT) {
         return;
     }
-    // Desde el código no hay cargador de PyInstaller y alcanza con child.kill():
-    // es el intérprete, o (venv de Windows) un lanzador que lo mata al cerrarse.
-    if source_python().is_none() {
-        kill_engine(child.pid(), engine_pid);
-        if exited(KILL_TIMEOUT) {
-            return;
-        }
+    kill_engine(child.pid(), engine_pid, source_python().is_none());
+    if !exited(KILL_TIMEOUT) {
+        let _ = child.kill();
     }
-    let _ = child.kill();
 }
 
-/// Mata al intérprete del motor sin tocar al cargador, y sin abrir consolas.
-/// Nunca a un PID reusado por otro programa: en Unix se apunta a los hijos del
-/// cargador (`pkill -P`); en Windows se filtra por PID *y* por nombre de imagen,
-/// porque el cargador cierra el handle del intérprete cuando este sale y,
-/// mientras limpia %TEMP%, ese PID puede volver a asignarse.
-fn kill_engine(loader: u32, engine: Option<u32>) {
+/// Mata al intérprete del motor sin abrir consolas.
+///
+/// Con el sidecar congelado (`frozen`), sin tocar al cargador y nunca a un PID
+/// reusado por otro programa: en Unix se apunta a los hijos del cargador
+/// (`pkill -P`); en Windows se filtra por PID *y* por nombre de imagen, porque
+/// el cargador cierra el handle del intérprete cuando este sale y, mientras
+/// limpia %TEMP%, ese PID puede volver a asignarse.
+///
+/// Desde el código (solo desarrollo) `child` puede ser el intérprete, un
+/// lanzador (venv de Windows) o un wrapper (`uv run`): se mata el PID del motor.
+fn kill_engine(loader: u32, engine: Option<u32>, frozen: bool) {
     #[cfg(windows)]
     let mut cmd = {
         use std::os::windows::process::CommandExt;
@@ -295,19 +295,26 @@ fn kill_engine(loader: u32, engine: Option<u32>) {
             .unwrap_or_else(|| PathBuf::from("taskkill.exe"));
         let mut cmd = std::process::Command::new(taskkill);
         match engine {
-            Some(pid) => cmd.args(["/F", "/FI", &format!("PID eq {pid}"), "/FI", "IMAGENAME eq janus-backend.exe"]),
-            // todavía descomprimiendo: no hay intérprete conocido, se baja el árbol
+            Some(pid) if frozen => cmd.args(["/F", "/FI", &format!("PID eq {pid}"), "/FI", "IMAGENAME eq janus-backend.exe"]),
+            Some(pid) => cmd.args(["/F", "/PID", &pid.to_string()]),
+            // todavía arrancando: no hay intérprete conocido, se baja el árbol
             None => cmd.args(["/F", "/T", "/PID", &loader.to_string()]),
         };
         cmd.creation_flags(CREATE_NO_WINDOW);
         cmd
     };
     #[cfg(unix)]
-    let mut cmd = {
-        let _ = engine;
-        let mut cmd = std::process::Command::new("pkill");
-        cmd.args(["-KILL", "-P", &loader.to_string()]);
-        cmd
+    let mut cmd = match engine {
+        Some(pid) if !frozen => {
+            let mut cmd = std::process::Command::new("kill");
+            cmd.args(["-KILL", &pid.to_string()]);
+            cmd
+        }
+        _ => {
+            let mut cmd = std::process::Command::new("pkill");
+            cmd.args(["-KILL", "-P", &loader.to_string()]);
+            cmd
+        }
     };
     let _ = cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
 }
